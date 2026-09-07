@@ -148,8 +148,23 @@ file is maintained by hand until a release-please pipeline lands
 - `runTick()` (`src/tick.ts`) and the `yak-harness tick --config <path>
   [--dry-run]` CLI command (spec §6.1, §10.2): `observe → plan → apply`,
   a one-line-per-action summary to stdout, `--dry-run` stops after
-  `plan`. The `tick.lock` file (§6.6) and `tick.log` (§10.5) arrive
-  with #7.
+  `plan`.
+- Operational shell (`src/lock.ts`, `src/tick-log.ts`, `src/cli.ts`,
+  spec §6.6, §10.5). **Overlap guard:** a real `tick` takes an
+  exclusive `.harness/tick.lock` (an advisory pid lock — exclusive
+  `wx` create, released on exit, a dead-pid file stolen once) and
+  **exits 0 immediately** when a live tick holds it; `--dry-run` takes
+  no lock. **`tick.log`:** each real tick appends one JSON line to
+  `.harness/tick.log` (`ts`, `durationMs`, `counts.issues`,
+  `counts.runs` by class, `actions[]` from `apply`'s applied log,
+  `errors[]`, `aborted?`); the harness self-rotates at a 2 MiB cap
+  (`tick.log` → `tick.log.1`, one generation, `logrotate`-free). A log
+  write that fails never fails the tick. `--dry-run` writes nothing.
+  New locked constants `TICK_LOCK_NAME`, `TICK_LOG_NAME`,
+  `TICK_LOG_MAX_BYTES`; `TickOptions.harnessDir`.
+- README (spec §10.3, §10.4): preconditions, the config-key table, the
+  CLI surface, the crontab line, and the `git pull && npm run build`
+  deploy step.
 - `observe` now populates `launchBreadcrumbs` from
   `.harness/runs/launching-*.json` (new `ObserveDeps.listLaunchBreadcrumbs`),
   so `plan`'s D guard sees an in-progress launch.

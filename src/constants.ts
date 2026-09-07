@@ -51,6 +51,15 @@ export const HARNESS_DIR_NAME = ".harness"; // config candidate if a real need a
 export const harnessDir = (yakRepoPath: string): string =>
   join(yakRepoPath, HARNESS_DIR_NAME);
 
+/** Overlap-guard lock file under `.harness/` (spec §6.6). */
+export const TICK_LOCK_NAME = "tick.lock"; // config candidate if a real need appears
+
+/** Self-rotating JSON-lines operational log under `.harness/` (spec §10.5). */
+export const TICK_LOG_NAME = "tick.log"; // config candidate if a real need appears
+
+/** Size at which `tick.log` rotates to `tick.log.1` (one generation kept, spec §10.5). */
+export const TICK_LOG_MAX_BYTES = 2 * 1024 * 1024; // config candidate if a real need appears
+
 /**
  * Per-run operational scratch under `.harness/` (spec §5.4): the durable
  * `<run-id>.json` pid file the stalled-kill reads (spec §9.3), and the

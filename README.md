@@ -5,14 +5,105 @@ Stateless cron reconciler that runs a GitHub Issues backlog through
 status-label state machine, and yak's gate prompts bridged into issue
 comments. yak's engine stays entirely ignorant that GitHub exists.
 
-**Status:** design complete, not yet implemented.
+Each run ("tick") wakes, reads desired state (qualifying issues + their
+status labels) and observed state (yak runs on disk, PRs on GitHub),
+computes the diff, applies **one step** toward closing it, and exits. No
+daemon; nothing runs between ticks.
 
 - **[`docs/spec.md`](docs/spec.md)** — the spec. Start here.
-- **[`docs/design/`](docs/design/)** — the wayfinder decision trail the
-  spec was distilled from: the map, seven decision docs, and the
-  gate-bridge prototype.
+- **[`docs/design/`](docs/design/)** — the decision trail: the map,
+  seven decision docs, and the gate-bridge prototype.
 
-Companion yak-engine requests (non-blocking): lchase/yak
-[#22](https://github.com/lchase/yak/issues/22),
-[#23](https://github.com/lchase/yak/issues/23),
-[#24](https://github.com/lchase/yak/issues/24).
+## Preconditions (spec §3)
+
+The box that runs the cron tick needs:
+
+1. `gh` on `PATH`, authenticated for the target repo (`gh auth status`).
+2. `yak` on `PATH` (a **runtime** requirement — there is no
+   `@lchase/yak` build dependency).
+3. `yakRepoPath` is a git repository yak can run in.
+4. Node 22 or newer.
+5. Write access to `<yakRepoPath>/.runs/` and `<yakRepoPath>/.harness/`.
+
+`yak-harness doctor --config <path>` checks all five; every check runs,
+each failure is reported, any failure exits non-zero.
+
+## Configuration (spec §4)
+
+One plain-JSON file, path passed as `--config <path>` to every
+invocation, `zod`-parsed at startup.
+
+| key | required | default | meaning |
+|---|---|---|---|
+| `repo` | yes | — | `owner/name` of the tracker repo |
+| `yakRepoPath` | yes | — | absolute path to the git repo yak runs in |
+| `stalledAfterMinutes` | yes | — | journal-mtime age past which a live run is `stalled` (no default — the operator must set it) |
+| `runsDir` | no | `<yakRepoPath>/.runs` | absolute path to yak's runs journal tree |
+| `qualifyingLabel` | no | `yak` | the human-applied scope-defence label |
+| `maxConcurrent` | no | `2` | cap on concurrent `yak run`s (ramped one launch per tick) |
+| `workflow` | no | `implement-change` | yak workflow to launch per issue |
+| `inputTemplate` | no | `issueRef={{repo}}#{{number}}` | `--input` string, `{{repo}}` / `{{number}}` substituted |
+
+The **cron interval is not config** — it lives only in the crontab
+line. The tick is stateless and idempotent; it does not know its own
+cadence.
+
+Example `/srv/harness.config.json`:
+
+```json
+{
+  "repo": "lchase/my-backlog",
+  "yakRepoPath": "/srv/my-project",
+  "stalledAfterMinutes": 45
+}
+```
+
+## CLI (spec §10.2)
+
+```
+yak-harness tick   --config <path> [--dry-run]   # one reconcile pass
+yak-harness doctor --config <path>               # check preconditions 1–5
+```
+
+- `--dry-run` runs `observe` + `plan`, prints the planned actions, and
+  applies nothing. It takes no lock and writes no log.
+- A real `tick` takes an exclusive lock on `.harness/tick.lock` at
+  startup and **exits 0 immediately** if another tick holds it — a slow
+  tick overlapping the next cron fire is safe with no operator setup
+  (spec §6.6).
+- Each real tick appends one JSON line to `.harness/tick.log`
+  (timestamp, duration, counts, every action taken, non-fatal errors).
+  The harness rotates that file itself at a size cap
+  (`tick.log` → `tick.log.1`) — no `logrotate` dependency (spec §10.5).
+- Fatal preconditions go to stderr with a non-zero exit. Nothing
+  remote.
+
+## Scheduling (spec §10.3)
+
+Plain system `cron`, one line:
+
+```
+*/5 * * * * yak-harness tick --config /srv/harness.config.json
+```
+
+A `systemd` timer is a supported alternative; no unit files are
+shipped. Overlap is the harness's concern, not the operator's.
+
+## Deploy (spec §10.4)
+
+```
+git pull && npm install && npm run build
+```
+
+on the box. The next cron tick runs the new `dist/`; no restart (the
+process is stateless). Conventional commits and a hand-maintained
+[`CHANGELOG.md`](CHANGELOG.md); no npm publish pipeline in v1.
+
+## Development
+
+- `npm run build` — `tsup` to `dist/` (`bin` entry `yak-harness` →
+  `dist/cli.js`)
+- `npm test` — `vitest run`
+- `npm run typecheck` — `tsc --noEmit`
+- `npm run check` — the full local gate (typecheck, lint, coverage,
+  build, repo guards)

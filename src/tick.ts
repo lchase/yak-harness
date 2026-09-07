@@ -1,14 +1,16 @@
 // One reconcile pass — `observe → plan → apply` (spec §6.1).
 //
-// The lock file (spec §6.6) and the `tick.log` JSON-lines file (spec
-// §10.5) arrive with ticket #7; for now the tick writes a plain summary
-// to stdout and non-fatal errors to stderr.
+// The tick writes a plain summary to stdout and non-fatal errors to
+// stderr; when `harnessDir` is set it also appends one JSON line to
+// `.harness/tick.log` (spec §10.5). The overlap-guard lock (spec §6.6)
+// is taken by the CLI around this call, not here.
 
 import { type ApplyDeps, type ApplyResult, apply } from "./apply.js";
 import type { Config } from "./config.js";
 import { MAX_RUN_ATTEMPTS } from "./constants.js";
 import { type ObserveDeps, observe } from "./observe.js";
 import { type Action, plan } from "./plan.js";
+import { appendTickLog } from "./tick-log.js";
 
 export interface TickIo {
   out(text: string): void;
@@ -24,6 +26,11 @@ export interface TickOptions {
   io: TickIo;
   /** `observe` + `plan` only — print the planned actions, apply nothing (spec §10.2). */
   dryRun?: boolean;
+  /**
+   * `.harness/` directory. When set, a real (non-`--dry-run`) tick
+   * appends one JSON line to `tick.log` here (spec §10.5).
+   */
+  harnessDir?: string;
 }
 
 /** One-line-per-action rendering for `--dry-run` and the applied summary. */
@@ -53,12 +60,13 @@ export function runTick(
   deps: TickDeps,
   opts: TickOptions,
 ): number {
+  const startedAt = new Date();
   const observation = observe(config, deps.observe);
   const actions = plan(observation);
 
   const runCounts = tallyRuns(observation.runs.map((r) => r.class));
   opts.io.out(
-    `tick: ${observation.issues.length} issue(s), ${observation.runs.length} run(s) [${runCounts}], ${actions.length} action(s)`,
+    `tick: ${observation.issues.length} issue(s), ${observation.runs.length} run(s) [${countsText(runCounts)}], ${actions.length} action(s)`,
   );
 
   if (opts.dryRun) {
@@ -68,13 +76,43 @@ export function runTick(
 
   const result = apply(actions, config, deps.apply);
   reportApply(result, opts.io);
+
+  if (opts.harnessDir) {
+    writeTickLog(opts.harnessDir, {
+      ts: startedAt.toISOString(),
+      durationMs: Date.now() - startedAt.getTime(),
+      counts: { issues: observation.issues.length, runs: runCounts },
+      actions: result.applied,
+      errors: result.errors,
+      ...(result.aborted ? { aborted: true } : {}),
+    });
+  }
+
   return result.aborted || result.errors.length > 0 ? 1 : 0;
 }
 
-function tallyRuns(classes: string[]): string {
-  const counts = new Map<string, number>();
-  for (const c of classes) counts.set(c, (counts.get(c) ?? 0) + 1);
-  return [...counts.entries()].map(([c, n]) => `${c}:${n}`).join(" ") || "none";
+/** Rendering the tick.log write so a logging failure never fails the tick. */
+function writeTickLog(
+  dir: string,
+  record: Parameters<typeof appendTickLog>[1],
+) {
+  try {
+    appendTickLog(dir, record);
+  } catch {
+    // The log is a debugging aid, not durable state (CLAUDE.md invariant
+    // 3) — a full disk or a bad path must not abort a reconcile.
+  }
+}
+
+function tallyRuns(classes: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const c of classes) counts[c] = (counts[c] ?? 0) + 1;
+  return counts;
+}
+
+function countsText(counts: Record<string, number>): string {
+  const parts = Object.entries(counts).map(([c, n]) => `${c}:${n}`);
+  return parts.join(" ") || "none";
 }
 
 function reportApply(result: ApplyResult, io: TickIo): void {
