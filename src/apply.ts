@@ -520,7 +520,14 @@ export function apply(
         result.aborted = true;
         return result;
       }
-      throw err;
+      // An unexpected throw from a dep (a `gh`/`yak` non-zero exit, an
+      // I/O error) is still a harness fault: abort and leave state for a
+      // human, but as a clean exit-1 with a `tick.log` line rather than
+      // an uncaught stack trace out of a cron job (spec §5.1, §10.5).
+      const detail = err instanceof Error ? err.message : String(err);
+      result.errors.push(`unexpected error applying ${action.kind}: ${detail}`);
+      result.aborted = true;
+      return result;
     }
   }
 

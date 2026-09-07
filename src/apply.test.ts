@@ -270,6 +270,18 @@ describe("apply — relabel (C)", () => {
     expect(calls).toEqual(["-label #7 yak:running", "+label #7 yak:pr-open"]);
   });
 
+  test("an unexpected throw from a dep aborts cleanly, not as an uncaught error", () => {
+    const { deps } = fake();
+    deps.addLabel = () => {
+      throw new Error("gh: boom");
+    };
+    const result = apply([relabel({ issue: 7 })], CONFIG, deps);
+    expect(result.aborted).toBe(true);
+    expect(result.errors).toEqual([
+      "unexpected error applying relabel: gh: boom",
+    ]);
+  });
+
   test("from ∅ (marker recovery) → only adds a label", () => {
     const { deps, calls } = fake();
     apply(

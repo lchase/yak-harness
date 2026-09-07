@@ -9,6 +9,13 @@ file is maintained by hand until a release-please pipeline lands
 
 ### Fixed
 
+- `addLabel` now creates a missing `yak:<status>` label and retries,
+  instead of the tick dying on `gh`'s "label not found" — the status
+  labels are harness-owned (spec §8.1) and needn't be pre-created in the
+  target repo.
+- An unexpected throw from a `gh` / `yak` / filesystem dep during `apply`
+  is caught and turned into a clean aborted tick with a `tick.log` line,
+  not an uncaught stack trace out of cron (spec §5.1, §10.5).
 - Read yak's run journal from `<runDir>/journal.jsonl`, its real
   filename, instead of `<runDir>/journal` — the latter always `ENOENT`d,
   so every real launch aborted with "journal has no run.started first

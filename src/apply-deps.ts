@@ -130,15 +130,43 @@ export function realApplyDeps(config: Config): ApplyDeps {
     },
 
     addLabel: (issue, label) => {
-      gh([
-        "issue",
-        "edit",
-        String(issue),
-        "--repo",
-        config.repo,
-        "--add-label",
-        label,
-      ]);
+      const edit = () =>
+        gh([
+          "issue",
+          "edit",
+          String(issue),
+          "--repo",
+          config.repo,
+          "--add-label",
+          label,
+        ]);
+      try {
+        edit();
+      } catch (err) {
+        // `gh issue edit --add-label` refuses a label the repo has not
+        // defined. The `yak:<status>` labels are harness-owned (spec §8.1)
+        // — create the missing one and retry once. Idempotent: a
+        // concurrent tick that already created it just makes this a no-op.
+        if (!/not found/i.test(String((err as { stderr?: string }).stderr))) {
+          throw err;
+        }
+        try {
+          gh([
+            "label",
+            "create",
+            label,
+            "--repo",
+            config.repo,
+            "--color",
+            "5319E7",
+            "--description",
+            "yak-harness status label",
+          ]);
+        } catch {
+          // Already exists (race) — fall through to the retry.
+        }
+        edit();
+      }
     },
 
     removeLabel: (issue, label) => {
