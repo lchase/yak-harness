@@ -51,6 +51,24 @@ export const HARNESS_DIR_NAME = ".harness"; // config candidate if a real need a
 export const harnessDir = (yakRepoPath: string): string =>
   join(yakRepoPath, HARNESS_DIR_NAME);
 
+/**
+ * Per-run operational scratch under `.harness/` (spec §5.4): the durable
+ * `<run-id>.json` pid file the stalled-kill reads (spec §9.3), and the
+ * transient `launching-<issue>.json` breadcrumb a launch drops before the
+ * spawn and clears once the marker comment is posted.
+ */
+export const HARNESS_RUNS_DIR_NAME = "runs"; // config candidate if a real need appears
+
+export const harnessRunsDir = (yakRepoPath: string): string =>
+  join(harnessDir(yakRepoPath), HARNESS_RUNS_DIR_NAME);
+
+/** `launching-<issue>.json` — the pre-spawn launch-in-progress breadcrumb. */
+export const launchingBreadcrumbName = (issue: number): string =>
+  `launching-${issue}.json`;
+
+/** `<run-id>.json` — the durable pid file kept for the §9.3 stalled kill. */
+export const pidFileName = (runId: string): string => `${runId}.json`;
+
 // Marker-comment formats (spec §5.2, §7, §9.4). `{...}` are substituted.
 // Kept as builder functions so the exact string lives in exactly one place.
 
@@ -61,6 +79,17 @@ export const runMarker = (args: {
   launched: string;
 }): string =>
   `<!-- yak-harness run=${args.run} branch=${args.branch} launched=${args.launched} -->`;
+
+/**
+ * The full launch comment body (spec §5.2): a human prose line plus the
+ * machine-read marker. The machine reads only the HTML comment.
+ */
+export const runMarkerComment = (args: {
+  run: string;
+  branch: string;
+  launched: string;
+}): string =>
+  `🐂 yak run started: \`${args.run}\`\n${runMarker(args)}`;
 
 /** Posted with a bridged gate prompt (spec §7.1). */
 export const gateMarker = (args: {
@@ -81,6 +110,15 @@ export const gateRepromptMarker = (args: {
 /** Written once a valid reply is parsed, before `yak resume` (spec §7.5). */
 export const gateAnsweredMarker = (args: { run: string; step: string }): string =>
   `<!-- yak-answered run=${args.run} step=${args.step} -->`;
+
+/**
+ * Launch poll (spec §5.1 step 3): after the detached spawn, `apply` polls
+ * `runsDir` every {@link LAUNCH_POLL_INTERVAL_MS} until exactly one new
+ * dir appears, giving up after {@link LAUNCH_POLL_TIMEOUT_MS}. yak `mkdir`s
+ * the run dir early so this resolves sub-second in practice.
+ */
+export const LAUNCH_POLL_INTERVAL_MS = 200; // config candidate if a real need appears
+export const LAUNCH_POLL_TIMEOUT_MS = 15_000; // config candidate if a real need appears
 
 /** Guards the single escalation comment on entry to `yak:failed` (spec §9.4). */
 export const failedMarker = (args: { run: string }): string =>

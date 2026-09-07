@@ -50,6 +50,31 @@ file is maintained by hand until a release-please pipeline lands
   one launch fires per tick even with several free slots. Every label
   decision comes from the §8.2 transition table; no `yak:<status>`
   string appears in `plan`'s body.
+- `apply()` — the tick's write phase (`src/apply.ts`, spec §6.1, §13
+  step 4): wires actions **C** (relabel) and **D** (launch) against an
+  injectable `ApplyDeps`. D drops a pre-spawn `launching-<issue>.json`
+  breadcrumb, snapshots `runsDir`, spawns `yak run … --isolation
+  worktree` detached, then polls the listing until exactly one new dir
+  appears — that name is the run id (zero after the timeout or two+ at
+  once aborts the tick, spec §5.1); asserts the journal's first event is
+  our `run.started`; writes the durable `<run-id>.json` pid file, clears
+  the breadcrumb, posts the sole linkage marker comment, and sets
+  `yak:running`. C moves the single `yak:<status>` label (remove old,
+  add new — both idempotent). A/B and the §9.4 escalation comment are
+  recorded as `skipped`, not dropped. At most one launch per tick; an
+  `ApplyError` aborts the remaining actions and leaves state for a human.
+- `realApplyDeps` (`src/apply-deps.ts`) — the write-side `gh` / `yak` /
+  filesystem boundary: detached `spawn` + `unref`, idempotent `gh issue
+  edit` label ops (absent-label removal swallowed), JSON breadcrumbs
+  under `.harness/runs/`.
+- `runTick()` (`src/tick.ts`) and the `yak-harness tick --config <path>
+  [--dry-run]` CLI command (spec §6.1, §10.2): `observe → plan → apply`,
+  a one-line-per-action summary to stdout, `--dry-run` stops after
+  `plan`. The `tick.lock` file (§6.6) and `tick.log` (§10.5) arrive
+  with #7.
+- `observe` now populates `launchBreadcrumbs` from
+  `.harness/runs/launching-*.json` (new `ObserveDeps.listLaunchBreadcrumbs`),
+  so `plan`'s D guard sees an in-progress launch.
 - `transition()` (`src/transition.ts`, spec §8.2) — the label state
   machine as a pure lookup `(currentStatus, observed) -> { next, kind,
   postGate }`, transcribed cell-for-cell from §8.2 and exhaustively
@@ -59,9 +84,9 @@ file is maintained by hand until a release-please pipeline lands
   `terminal-bad`). `yak:failed` and `yak:done` are traps — every column
   is a noop.
 - `Observation` gains `maxConcurrent` (so `plan` stays a pure function
-  of one value), plus `launchBreadcrumbs`, `gatesPosted`, and
-  `gateReplies` — empty until the detached-launch (#7) and gate-bridge
-  (#6) work populates them.
+  of one value), plus `launchBreadcrumbs` (now populated from
+  `.harness/runs/launching-*.json`), and `gatesPosted` / `gateReplies` —
+  empty until the gate-bridge (#6) work populates them.
 - `realObserveDeps` (`src/observe-deps.ts`) — the sole `gh` / `yak` /
   filesystem boundary. Guards every `JSON.parse` of external output
   behind a typed `ObserveError`; boundary-validates `yak pending` with a

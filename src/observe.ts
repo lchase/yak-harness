@@ -224,6 +224,14 @@ export interface ObserveDeps {
   yakPending(): RawPendingRun[];
   /** Directory names directly under `runsDir`. */
   listRunDirs(): string[];
+  /**
+   * Issue numbers with an in-progress `.harness/runs/launching-<issue>.json`
+   * breadcrumb — a spawn that has begun but not yet posted its marker
+   * (spec §5.4). `plan` treats one as "a launch is already under way for
+   * this issue" and holds action D off it. A missing breadcrumb only ever
+   * risks a duplicate launch, never a lost one.
+   */
+  listLaunchBreadcrumbs(): number[];
   /** A run's journal text (or `null`) plus a stalled-clock mtime (journal file, else run dir). */
   readRun(runId: string): { journal: string | null; mtimeMs: number | null };
   /**
@@ -562,7 +570,7 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     runs,
     pending,
     maxConcurrent: config.maxConcurrent,
-    launchBreadcrumbs: [], // ticket #7 — detached launch + `.harness/runs/*`
+    launchBreadcrumbs: deps.listLaunchBreadcrumbs(),
     gatesPosted: [], // ticket #6 — gate bridge
     gateReplies: [], // ticket #6 — gate bridge
     runToIssue: link.runToIssue,

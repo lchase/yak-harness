@@ -69,6 +69,12 @@ export interface RelabelAction {
 export interface LaunchRunAction {
   kind: "launch-run";
   issue: number;
+  /**
+   * The `yak:<status>` label `apply` sets once the launch resolves — the
+   * §8.2 target for a launch (`yak:running`). Carried here so no label
+   * string is named in `apply`'s body (CLAUDE.md invariant 4).
+   */
+  to: YakStatus;
   guard: {
     inFlightCount: number;
     maxConcurrent: number;
@@ -231,6 +237,7 @@ export function plan(obs: Observation): Action[] {
       dCandidates.push({
         kind: "launch-run",
         issue: issue.number,
+        to: t.next,
         guard: {
           inFlightCount,
           maxConcurrent: obs.maxConcurrent,

@@ -113,6 +113,7 @@ describe("plan", () => {
       {
         kind: "launch-run",
         issue: 1,
+        to: "running",
         guard: {
           inFlightCount: 0,
           maxConcurrent: 2,

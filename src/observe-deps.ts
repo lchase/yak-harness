@@ -20,7 +20,11 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Config } from "./config.js";
-import { YAK_STATUS_NAMES, YAK_STATUS_PREFIX } from "./constants.js";
+import {
+  harnessRunsDir,
+  YAK_STATUS_NAMES,
+  YAK_STATUS_PREFIX,
+} from "./constants.js";
 import type {
   ObserveDeps,
   RawComment,
@@ -329,6 +333,34 @@ export function realObserveDeps(config: Config): ObserveDeps {
       } catch {
         return [];
       }
+    },
+
+    listLaunchBreadcrumbs: () => {
+      const dir = harnessRunsDir(config.yakRepoPath);
+      let names: string[];
+      try {
+        names = readdirSync(dir).filter(
+          (n) => n.startsWith("launching-") && n.endsWith(".json"),
+        );
+      } catch {
+        return [];
+      }
+      const issues: number[] = [];
+      for (const name of names) {
+        try {
+          const parsed = JSON.parse(
+            readFileSync(join(dir, name), "utf8"),
+          ) as { issue?: unknown };
+          if (typeof parsed.issue === "number") issues.push(parsed.issue);
+        } catch {
+          // A half-written breadcrumb from a tick that died mid-write:
+          // fall back to the issue number in the filename so the launch is
+          // still treated as in-progress (never risk a duplicate launch).
+          const m = /^launching-(\d+)\.json$/.exec(name);
+          if (m) issues.push(Number(m[1]));
+        }
+      }
+      return issues;
     },
 
     readRun: (runId) => {
