@@ -40,6 +40,28 @@ file is maintained by hand until a release-please pipeline lands
   state for `ok` runs. Flags a two-`yak:<status>` issue as a fault;
   drops `yak:hold` issues from `issues[]` while still counting their
   markers so a parked-but-running job is not mistaken for an orphan.
+- `plan()` — the tick's decision phase (`src/plan.ts`, spec §6.1, §6.3):
+  a pure function of the `Observation` (no I/O, no clock, tests are plain
+  literals) that emits the five action kinds — A `post-gate-comment`,
+  B `write-answer-and-resume`, C `relabel`, D `launch-run`,
+  E `flag-orphan` — each carrying the idempotency guard it was planned
+  under. Precedence within a tick is E → B → A → C → D; a live orphan
+  suppresses D that tick; D is the only cap-consuming action and at most
+  one launch fires per tick even with several free slots. Every label
+  decision comes from the §8.2 transition table; no `yak:<status>`
+  string appears in `plan`'s body.
+- `transition()` (`src/transition.ts`, spec §8.2) — the label state
+  machine as a pure lookup `(currentStatus, observed) -> { next, kind,
+  postGate }`, transcribed cell-for-cell from §8.2 and exhaustively
+  unit-tested against an independent transcription. `observed` widens
+  the run class to the table's eight columns (`ok` split by PR
+  disposition; `failed` / `stalled` / stale marker collapsed to
+  `terminal-bad`). `yak:failed` and `yak:done` are traps — every column
+  is a noop.
+- `Observation` gains `maxConcurrent` (so `plan` stays a pure function
+  of one value), plus `launchBreadcrumbs`, `gatesPosted`, and
+  `gateReplies` — empty until the detached-launch (#7) and gate-bridge
+  (#6) work populates them.
 - `realObserveDeps` (`src/observe-deps.ts`) — the sole `gh` / `yak` /
   filesystem boundary. Guards every `JSON.parse` of external output
   behind a typed `ObserveError`; boundary-validates `yak pending` with a

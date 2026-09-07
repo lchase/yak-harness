@@ -352,7 +352,20 @@ describe("observe", () => {
 
   test("returns every Observation section", () => {
     expect(Object.keys(obs).sort()).toEqual(
-      ["issues", "issueToRun", "linkageFaults", "orphans", "pending", "runToIssue", "runs", "stale"].sort(),
+      [
+        "issues",
+        "issueToRun",
+        "linkageFaults",
+        "orphans",
+        "pending",
+        "runToIssue",
+        "runs",
+        "stale",
+        "maxConcurrent",
+        "launchBreadcrumbs",
+        "gatesPosted",
+        "gateReplies",
+      ].sort(),
     );
   });
 

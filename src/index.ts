@@ -41,7 +41,26 @@ export {
   type RawComment,
   type RawPendingRun,
   type RawPr,
+  type GateReply,
 } from "./observe.js";
+export {
+  transition,
+  OBSERVED_VALUES,
+  CURRENT_STATUS_VALUES,
+  type Observed,
+  type CurrentStatus,
+  type Transition,
+} from "./transition.js";
+export {
+  plan,
+  deriveObserved,
+  type Action,
+  type PostGateCommentAction,
+  type WriteAnswerAndResumeAction,
+  type RelabelAction,
+  type LaunchRunAction,
+  type FlagOrphanAction,
+} from "./plan.js";
 export {
   runIdIsSafe,
   branchIsSafe,
