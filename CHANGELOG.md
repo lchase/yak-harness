@@ -9,6 +9,27 @@ file is maintained by hand until a release-please pipeline lands
 
 ### Added
 
+- `implement-change` workflow (`workflows/implement-change.yaml`, spec
+  §4.1) — the runnable yak artifact the harness launches per issue. One
+  workflow over bug / feature / chore: `assess` classifies the change,
+  `confirm-scope` gates when confidence ≤ 0.85, the feature-only steps
+  (`design`, `design-review`, `docs`) self-skip off the classification,
+  `build → verify → checkpoint` implements and verifies (the agent
+  commits; `checkpoint` suspends for a human iff `verify` is red),
+  `approve-pr` gates the PR, `open-pr` pushes and opens it. Self-contained:
+  inline JSON-Schema, inline prompts, no `.yak/` directory — ships with
+  the harness. Validated end to end against `yak-kanban-sandbox` issue 01
+  (hands-free to a green `verify` and an open PR — closes the yak run
+  half of #11's criterion 7). v1 deviations from the §4.1 sketch (linear
+  `deliver` not a bounded loop — yak#35; review/rank fan-out; design
+  confidence auto-skip; artifact-passed feature state) are noted in
+  spec §4.1.
+- `resolveWorkflowPath` (`src/workflow-path.ts`) — `apply` resolves
+  `config.workflow` (a bare name) to the bundled
+  `workflows/<name>.yaml`; a value containing a path separator or a
+  `.yaml`/`.yml` extension is used directly (resolved against
+  `yakRepoPath` when relative). `package.json` `files` now ships
+  `workflows/`.
 - Repo scaffold: TypeScript + ESM + Node 22 toolchain, `tsup` build,
   `vitest`, `zod` + `ajv` dependencies, `CLAUDE.md` invariants.
 - Config schema (`src/config.ts`, spec §4): `zod`-parsed JSON, strict

@@ -1,7 +1,10 @@
 # yak workflows the harness drives
 
 The harness (`docs/spec.md`) launches one `yak run <workflow>` per qualifying
-issue. This directory is the design trail for that workflow.
+issue. This directory is the **design trail**. The runnable artifact is
+[`../../../workflows/implement-change.yaml`](../../../workflows/implement-change.yaml),
+bundled with the harness. See spec §4.1 for the v1 deviations from the shape
+drawn here.
 
 ## Files
 
