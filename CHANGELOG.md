@@ -24,11 +24,13 @@ file is maintained by hand until a release-please pipeline lands
   gate bridge now checks the journal: a run that advanced or reached a
   terminal event is a success; only a non-zero resume that moved nothing
   is a fault (found driving spec §26 end-to-end).
-- `implement-change` workflow: `confirm-scope` now gates before `design`
-  / `design-review` / `plan` (was parallel), and `design-review` waits
-  for `design`. Previously `confirm-scope` and `design-review` opened as
-  two concurrent gates, which the harness could not answer from two
-  separate issue comments unambiguously.
+- `implement-change` workflow: `design` / `design-review` / `plan` now
+  `needs` `scopeDecision`, so `confirm-scope` resolves (human-answered or
+  `skipIf`) before any of them start — previously `confirm-scope` and
+  `design-review` could open as two concurrent gates the harness cannot
+  disambiguate. The dep is on the gate's artifact, not on the `design`
+  agent step: yak writes no artifact for a skipped agent step, so a
+  `needs` on `design` stalls the whole run on the bug/chore path.
 - A gate whose `pending/<step>.request.json` has a sibling
   `<step>.answer.json` is no longer reported as open — yak leaves the
   request file in place after an answer, so without this every
