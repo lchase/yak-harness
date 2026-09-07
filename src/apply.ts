@@ -1,10 +1,11 @@
 // The tick's write phase (spec §6.1) — the only place, alongside
 // `observe-deps.ts`, that touches GitHub / yak / the filesystem.
 //
-// This wires **C** (relabel, incl. the §9.4 escalation comment), **D**
-// (launch), **E** (orphan / stale flagging) and the §9.1 auto-retry (a
-// fresh `yak run` off a `recoverable` failure). A / B (gate bridge,
-// ticket #6) are recorded as skipped, not silently dropped.
+// This wires **C** (relabel, incl. the §9.4 escalation comment and the
+// §9.3 stalled kill), **D** (launch), **E** (orphan / stale flagging) and
+// the §9.1 auto-retry (a fresh `yak run` off a `recoverable` failure).
+// A / B (gate bridge, ticket #6) are recorded as skipped, not silently
+// dropped.
 //
 // Every action is idempotent and guarded by a predicate `plan` already
 // evaluated from the `Observation` (spec §6.4). `apply` re-checks nothing
@@ -23,6 +24,8 @@ import {
   launchingBreadcrumbName,
   pidFileName,
   runMarkerComment,
+  type StalledKillOutcome,
+  stalledEscalation,
   YAK_STATUS_PREFIX,
 } from "./constants.js";
 import { parseJournal } from "./observe.js";
@@ -70,6 +73,14 @@ export interface ApplyDeps {
   addLabel(issue: number, label: string): void;
   /** Remove a label from an issue (no-op when absent). */
   removeLabel(issue: number, label: string): void;
+  /**
+   * Look up a live process by pid for the §9.3 stalled kill. `null` when
+   * no process holds that pid. `isYak` guards pid reuse — only a `yak`
+   * process is ever killed.
+   */
+  processInfo(pid: number): { isYak: boolean } | null;
+  /** Send SIGTERM to `pid` (spec §9.3). Swallows "already gone". */
+  killProcess(pid: number): void;
 }
 
 export interface ApplyResult {
@@ -105,12 +116,59 @@ export const branchForRun = (runId: string): string => `yak/${runId}`;
 
 // ── C — relabel ──────────────────────────────────────────────────────
 
+/**
+ * §9.3 — kill the pid recorded for a stalled run, guarding against pid
+ * reuse (verify it is alive **and** a `yak` process). Returns what
+ * happened, for the §9.4 comment. A dead pid or a reused pid is not an
+ * error: the run is wedged either way and the label still moves.
+ */
+function killStalledRun(
+  stall: NonNullable<RelabelAction["stall"]>,
+  runId: string | null,
+  deps: ApplyDeps,
+  result: ApplyResult,
+): StalledKillOutcome {
+  const tag = runId ?? "unknown";
+  // Defence in depth: only a positive integer pid ever reaches `ps` /
+  // `process.kill` — a negative value would signal a process group.
+  if (stall.pid === null || !Number.isInteger(stall.pid) || stall.pid <= 0) {
+    return "no-pid";
+  }
+
+  const info = deps.processInfo(stall.pid);
+  if (info === null) {
+    result.notes.push(
+      `stalled run ${tag}: recorded pid ${stall.pid} is not alive — no kill needed`,
+    );
+    return "already-gone";
+  }
+  if (!info.isYak) {
+    result.notes.push(
+      `stalled run ${tag}: pid ${stall.pid} is not a yak process — not killing (pid-reuse guard)`,
+    );
+    return "pid-reused";
+  }
+  deps.killProcess(stall.pid);
+  result.applied.push(`killed stalled run ${tag} (pid ${stall.pid})`);
+  return "killed";
+}
+
 function applyRelabel(
   action: RelabelAction,
   deps: ApplyDeps,
   result: ApplyResult,
 ): void {
   const target = `${YAK_STATUS_PREFIX}${action.to}`;
+
+  // §9.3 — a stalled run: kill the recorded pid *before* the label moves,
+  // so a tick that dies mid-kill retries the whole transition next tick
+  // rather than stranding a live wedged process under `yak:failed` (a
+  // trap row — no further relabel action would ever revisit it).
+  let stallDetail: { broke: string; tried: string } | undefined;
+  if (action.stall) {
+    const outcome = killStalledRun(action.stall, action.runId, deps, result);
+    stallDetail = stalledEscalation(action.stall.durationText, outcome);
+  }
 
   if (action.escalate) {
     // The one §9.4 escalation comment, guarded by its `<!-- yak-failed
@@ -119,10 +177,11 @@ function applyRelabel(
     // issue still `yak:running` with the comment up, and next tick's
     // `plan` sees the marker and moves the label without re-posting.
     const run = action.runId ?? "unknown";
-    const detail = action.escalation ?? {
-      broke: "the run needs a human",
-      tried: "see the run journal",
-    };
+    const detail = stallDetail ??
+      action.escalation ?? {
+        broke: "the run needs a human",
+        tried: "see the run journal",
+      };
     deps.postComment(
       action.issue,
       failedComment({ run, broke: detail.broke, tried: detail.tried }),

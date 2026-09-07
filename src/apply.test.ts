@@ -35,10 +35,13 @@ interface FakeOpts {
   newDirsOnSpawn?: string[];
   journals?: Record<string, string>;
   pid?: number;
+  /** pid → process lookup for the §9.3 stalled kill (absent pid → dead). */
+  processes?: Record<number, { isYak: boolean }>;
 }
 
 function fake(opts: FakeOpts = {}) {
   const calls: string[] = [];
+  const bodies: string[] = [];
   let runDirs = [...(opts.initialRunDirs ?? [])];
   let nowMs = Date.parse("2026-09-06T09:00:00Z");
   const journals = opts.journals ?? {
@@ -60,13 +63,17 @@ function fake(opts: FakeOpts = {}) {
     writeBreadcrumb: (name, data) =>
       calls.push(`write ${name} ${JSON.stringify(data)}`),
     removeBreadcrumb: (name) => calls.push(`remove ${name}`),
-    postComment: (issue, body) =>
-      calls.push(`comment #${issue} :: ${body.split("\n").pop()}`),
+    postComment: (issue, body) => {
+      calls.push(`comment #${issue} :: ${body.split("\n").pop()}`);
+      bodies.push(body);
+    },
     addLabel: (issue, label) => calls.push(`+label #${issue} ${label}`),
     removeLabel: (issue, label) => calls.push(`-label #${issue} ${label}`),
+    processInfo: (pid) => opts.processes?.[pid] ?? null,
+    killProcess: (pid) => calls.push(`kill ${pid}`),
   };
 
-  return { deps, calls };
+  return { deps, calls, bodies };
 }
 
 const launch = (issue: number): Action => ({
@@ -307,6 +314,71 @@ describe("apply — relabel (C)", () => {
   test("escalate:false → label moves, no comment (a prior tick already escalated)", () => {
     const { deps, calls } = fake();
     apply([relabel({ issue: 7, to: "failed", escalate: false })], CONFIG, deps);
+    expect(calls).toEqual(["-label #7 yak:running", "+label #7 yak:failed"]);
+  });
+
+  // ── §9.3 stalled kill ─────────────────────────────────────────────
+  const stalledRelabel = (
+    stall: { durationText: string; pid: number | null },
+    escalate = true,
+  ): Action => relabel({ issue: 7, to: "failed", escalate, stall });
+
+  test("stalled + live yak pid → kill first, then comment (dur + 'process killed'), then label", () => {
+    const { deps, calls, bodies } = fake({
+      processes: { 4242: { isYak: true } },
+    });
+    const result = apply(
+      [stalledRelabel({ durationText: "46m", pid: 4242 })],
+      CONFIG,
+      deps,
+    );
+    expect(calls).toEqual([
+      "kill 4242",
+      "comment #7 :: <!-- yak-failed run=r1 -->",
+      "-label #7 yak:running",
+      "+label #7 yak:failed",
+    ]);
+    expect(bodies[0]).toMatch(/no journal activity for 46m, process killed/);
+    expect(result.applied).toContain("killed stalled run r1 (pid 4242)");
+  });
+
+  test("pid-reuse guard: pid belongs to a non-yak process → no kill, still relabelled + commented", () => {
+    const { deps, calls, bodies } = fake({
+      processes: { 4242: { isYak: false } },
+    });
+    apply([stalledRelabel({ durationText: "1h 5m", pid: 4242 })], CONFIG, deps);
+    expect(calls).not.toContain("kill 4242");
+    expect(calls).toEqual([
+      "comment #7 :: <!-- yak-failed run=r1 -->",
+      "-label #7 yak:running",
+      "+label #7 yak:failed",
+    ]);
+    expect(bodies[0]).toMatch(/non-yak process/);
+  });
+
+  test("dead pid → no kill attempt, still relabelled", () => {
+    const { deps, calls, bodies } = fake({ processes: {} });
+    apply([stalledRelabel({ durationText: "2h", pid: 4242 })], CONFIG, deps);
+    expect(calls).not.toContain("kill 4242");
+    expect(calls[calls.length - 1]).toBe("+label #7 yak:failed");
+    expect(bodies[0]).toMatch(/process already gone/);
+  });
+
+  test("no recorded pid → no kill, comment says nothing to kill", () => {
+    const { deps, calls, bodies } = fake();
+    apply([stalledRelabel({ durationText: "3h", pid: null })], CONFIG, deps);
+    expect(calls.some((c) => c.startsWith("kill"))).toBe(false);
+    expect(bodies[0]).toMatch(/no pid on record/);
+  });
+
+  test("re-running after the kill is a no-op-shaped move (escalate:false, dead pid)", () => {
+    const { deps, calls } = fake({ processes: {} });
+    apply(
+      [stalledRelabel({ durationText: "46m", pid: 4242 }, false)],
+      CONFIG,
+      deps,
+    );
+    // no comment, no kill — just the idempotent label add/remove
     expect(calls).toEqual(["-label #7 yak:running", "+label #7 yak:failed"]);
   });
 });

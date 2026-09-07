@@ -104,7 +104,9 @@ export function issueLabelSearch(qualifyingLabel: string): string {
 }
 
 const RunBreadcrumbFileSchema = z.object({
-  pid: z.number(),
+  // Positive int only — a negative pid would signal a whole process group
+  // if it ever reached `process.kill` (spec §9.3 stalled kill).
+  pid: z.number().int().positive(),
   issue: z.number().int().positive(),
   launchedAt: z.string().min(1),
 });
@@ -131,7 +133,12 @@ export function parseRunBreadcrumb(
   }
   const res = RunBreadcrumbFileSchema.safeParse(json);
   return res.success
-    ? { runId, issue: res.data.issue, launchedAt: res.data.launchedAt }
+    ? {
+        runId,
+        issue: res.data.issue,
+        launchedAt: res.data.launchedAt,
+        pid: res.data.pid,
+      }
     : null;
 }
 

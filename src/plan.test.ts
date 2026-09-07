@@ -6,7 +6,7 @@ import type {
   Observation,
   RunObservation,
 } from "./observe.js";
-import { type Action, deriveObserved, plan } from "./plan.js";
+import { type Action, deriveObserved, formatDuration, plan } from "./plan.js";
 
 // ── builders (plain literals — `plan` needs no mocks) ────────────────
 
@@ -44,6 +44,8 @@ const run = (
 ): RunObservation => ({
   lastEventAt: null,
   journalMtimeMs: null,
+  mtimeAgeMs: null,
+  recordedPid: null,
   terminalFailure: null,
   pr: o.class === "ok" ? "open" : null,
   ...o,
@@ -75,6 +77,16 @@ const orphan = (
 ): import("./observe.js").Orphan => ({ recovery: null, ...o });
 
 const kinds = (actions: Action[]): string[] => actions.map((a) => a.kind);
+
+describe("formatDuration", () => {
+  test("minutes under an hour, hours with and without remainder, unknown", () => {
+    expect(formatDuration(45 * 60_000)).toBe("45m");
+    expect(formatDuration(60 * 60_000)).toBe("1h");
+    expect(formatDuration(192 * 60_000)).toBe("3h 12m");
+    expect(formatDuration(null)).toBe("an unknown period");
+    expect(formatDuration(-5)).toBe("an unknown period");
+  });
+});
 
 // ── deriveObserved ──────────────────────────────────────────────────
 
@@ -443,18 +455,52 @@ describe("plan — §9.1 retry", () => {
     expect(actions).toEqual([]);
   });
 
-  test("a stalled run escalates with the never-retries reason", () => {
+  test("a stalled run relabels to failed with a kill directive + stall duration", () => {
     const actions = plan(
       obs({
         issues: [linked(1, "r1", "running")],
-        runs: [run({ id: "r1", class: "stalled" })],
+        runs: [
+          run({
+            id: "r1",
+            class: "stalled",
+            mtimeAgeMs: 46 * 60_000,
+            recordedPid: 4242,
+          }),
+        ],
       }),
     );
     expect(kinds(actions)).toEqual(["relabel"]);
-    const esc = (actions[0] as { escalation: { broke: string; tried: string } })
-      .escalation;
-    expect(esc.broke).toMatch(/stalled/);
-    expect(esc.tried).toMatch(/never retry/);
+    expect(actions[0]).toMatchObject({
+      to: "failed",
+      escalate: true,
+      stall: { durationText: "46m", pid: 4242 },
+    });
+    // stall drives the comment in `apply`; `escalation` is not pre-composed.
+    expect((actions[0] as { escalation?: unknown }).escalation).toBeUndefined();
+  });
+
+  test("a stalled run with no recorded pid still relabels — stall.pid is null", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(1, "r1", "running")],
+        runs: [run({ id: "r1", class: "stalled", mtimeAgeMs: 3 * 3600_000 })],
+      }),
+    );
+    expect(actions[0]).toMatchObject({
+      to: "failed",
+      stall: { durationText: "3h", pid: null },
+    });
+  });
+
+  test("a stalled run never produces a retry launch", () => {
+    const i = { ...linked(1, "r1", "running"), attemptCount: 1 };
+    const actions = plan(
+      obs({
+        issues: [i],
+        runs: [run({ id: "r1", class: "stalled", recordedPid: 5 })],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["relabel"]);
   });
 
   test("a failed run with no terminal StepFailure still escalates (not retried)", () => {

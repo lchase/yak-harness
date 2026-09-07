@@ -127,5 +127,28 @@ export function realApplyDeps(config: Config): ApplyDeps {
         // target state is reached either way (spec §6.4).
       }
     },
+
+    processInfo: (pid) => {
+      try {
+        const out = execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        if (!out) return null;
+        const argv0 = out.split("\n")[0] ?? "";
+        return { isYak: /(?:^|\/)yak(?:\s|$)/.test(argv0) };
+      } catch {
+        // `ps` exits non-zero when no process holds that pid.
+        return null;
+      }
+    },
+
+    killProcess: (pid) => {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Gone between the check and here — target state (dead) holds.
+      }
+    },
   };
 }

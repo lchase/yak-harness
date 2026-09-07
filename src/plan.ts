@@ -78,6 +78,16 @@ export interface RelabelAction {
    * when `escalate` is `true`.
    */
   escalation?: { broke: string; tried: string };
+  /**
+   * Set when this move into `yak:failed` is driven by a `stalled` run
+   * (spec §9.3). `apply` kills `pid` first (verifying it is alive **and**
+   * a `yak` process — pid-reuse guard), then composes the §9.4 comment
+   * from `durationText` + the kill outcome (so `escalation` is not set
+   * for a stall). `pid` is `null` when no pid file survives — `apply`
+   * still relabels and comments, just skips the kill. `stalled` never
+   * retries.
+   */
+  stall?: { durationText: string; pid: number | null };
   /** Idempotency: `gh` label add/remove is a no-op when already applied. */
   guard: { currentStatus: CurrentStatus };
 }
@@ -194,6 +204,16 @@ export function deriveObserved(
 
 const gateKey = (runId: string, stepId: string): string =>
   `${runId}\t${stepId}`;
+
+/** Human-readable stall age for the §9.4 comment — `45m`, `3h 12m`, `2h`. */
+export function formatDuration(ms: number | null): string {
+  if (ms === null || ms < 0) return "an unknown period";
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem ? `${hours}h ${rem}m` : `${hours}h`;
+}
 
 /**
  * Compose the §9.4 escalation comment's `what broke` / `what was tried`
@@ -367,6 +387,15 @@ export function plan(obs: Observation): Action[] {
         });
       } else {
         const escalate = t.next === "failed" && !escalated.has(runId ?? "");
+        // §9.3 — a stall drives the kill + a duration-bearing comment that
+        // `apply` composes once it knows the pid's fate.
+        const stall =
+          t.next === "failed" && run?.class === "stalled"
+            ? {
+                durationText: formatDuration(run.mtimeAgeMs),
+                pid: run.recordedPid,
+              }
+            : undefined;
         cActions.push({
           kind: "relabel",
           issue: issue.number,
@@ -374,7 +403,8 @@ export function plan(obs: Observation): Action[] {
           to: t.next,
           runId,
           escalate,
-          ...(escalate
+          ...(stall ? { stall } : {}),
+          ...(escalate && !stall
             ? {
                 escalation: escalationDetail(observed, run, issue.attemptCount),
               }

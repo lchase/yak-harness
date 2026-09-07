@@ -31,11 +31,12 @@ describe("parseRunBreadcrumb", () => {
     launchedAt: "2026-09-06T09:00:00.000Z",
   });
 
-  test("well-formed pid file → runId from filename + issue + launchedAt", () => {
+  test("well-formed pid file → runId from filename + issue + launchedAt + pid", () => {
     expect(parseRunBreadcrumb("2026-09-06T09-12-44Z-a1b2.json", body)).toEqual({
       runId: "2026-09-06T09-12-44Z-a1b2",
       issue: 7,
       launchedAt: "2026-09-06T09:00:00.000Z",
+      pid: 4242,
     });
   });
 

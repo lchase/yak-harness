@@ -125,6 +125,36 @@ export const LAUNCH_POLL_TIMEOUT_MS = 15_000; // config candidate if a real need
 export const failedMarker = (args: { run: string }): string =>
   `<!-- yak-failed run=${args.run} -->`;
 
+/** What the §9.3 stalled kill did with the recorded pid. */
+export type StalledKillOutcome =
+  | "killed"
+  | "already-gone"
+  | "pid-reused"
+  | "no-pid";
+
+/**
+ * Compose the §9.4 escalation `broke` / `tried` lines for a `stalled` run
+ * (spec §9.3): the stall duration plus what became of the recorded pid.
+ * `stalled` never retries — no `recoverable` signal exists.
+ */
+export const stalledEscalation = (
+  durationText: string,
+  outcome: StalledKillOutcome,
+): { broke: string; tried: string } => {
+  const clause = {
+    killed: "process killed",
+    "already-gone": "process already gone — nothing to kill",
+    "pid-reused":
+      "recorded pid now belongs to a non-yak process — left alone (pid-reuse guard)",
+    "no-pid": "no pid on record — nothing to kill",
+  }[outcome];
+  return {
+    broke: `run stalled — no journal activity for ${durationText}, ${clause}`,
+    tried:
+      "not retried — a stall is genuine wedging, not a transient failure (spec §9.3)",
+  };
+};
+
 /**
  * The one escalation comment posted on every transition into `yak:failed`
  * (spec §9.4): what broke, what the harness tried, what the human does —
