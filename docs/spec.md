@@ -272,7 +272,8 @@ The harness is the sole launcher and performs **one launch per tick**
 
 1. `listdir(runsDir)` → `before` set.
 2. Spawn `yak run <workflow> --isolation worktree` **detached** (§5.4),
-   with `--input` built from `inputTemplate`.
+   with `--input` built from `inputTemplate` (yak#27, §12.1 — the one
+   hard yak dependency).
 3. Poll `listdir(runsDir)` until exactly one new directory appears
    (sub-second — yak `mkdir`s the run dir early). `after - before` must
    be exactly one name; that is the run id. Zero or multiple new dirs
@@ -781,10 +782,24 @@ Overlap is the harness's concern (§6.6), not the operator's. A
 
 ---
 
-## 12. Candidate yak changes (noted, not depended on)
+## 12. yak changes
+
+### 12.1 Hard dependency
+
+- **`yak run --input <str>`** ([lchase/yak#27](https://github.com/lchase/yak/issues/27))
+  — pass the workflow input at launch. The harness is an out-of-process
+  launcher: it spawns one `yak run` per issue and must tell the workflow
+  *which* issue (§5.1 step 2, `--input` built from `inputTemplate`;
+  §4.1's `input: z.object({ issueRef })`). yak's `yak run` has no
+  `--input` flag today and nothing consumes the workflow's declared
+  `inputSchema` at runtime. There is **no harness-side workaround** —
+  the value has to reach the engine. Blocks the end-to-end acceptance
+  run of `implement-change` against `yak-kanban-sandbox`.
+
+### 12.2 Candidate simplifications (noted, not depended on)
 
 Collected from the decision docs. Each would simplify the harness; none is a
-prerequisite. All three filed against yak proper 2026-09-06:
+prerequisite. Filed against yak proper 2026-09-06:
 
 - **`yak run --tag <string>`** ([lchase/yak#22](https://github.com/lchase/yak/issues/22))
   — a caller-supplied correlation tag, stored in the `run.started`
