@@ -9,7 +9,7 @@ comments. yak's engine stays entirely ignorant that GitHub exists.
 
 - **[`docs/spec.md`](docs/spec.md)** — the spec. Start here.
 - **[`docs/design/`](docs/design/)** — the wayfinder decision trail the
-  spec was distilled from: the map, seven decision tickets, and the
+  spec was distilled from: the map, seven decision docs, and the
   gate-bridge prototype.
 
 Companion yak-engine requests (non-blocking): lchase/yak

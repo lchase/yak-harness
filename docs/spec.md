@@ -2,8 +2,8 @@
 
 **Status:** design complete, ready to hand to an implementation effort.
 Assembled from the wayfinder effort in [`design/`](design/) — the map,
-tickets `01`–`07`, and `prototype-gate-bridge.md`. Section references
-like "ticket 02" point at [`design/tickets/`](design/tickets/) for the
+decisions `01`–`07`, and `prototype-gate-bridge.md`. Section references
+like "decision 02" point at [`design/decisions/`](design/decisions/) for the
 full reasoning behind each decision.
 
 ---
@@ -81,7 +81,7 @@ any of it. `yak-harness doctor` checks 1–5 on demand.
 
 ---
 
-## 4. Configuration (ticket 06)
+## 4. Configuration (decision 06)
 
 One plain-JSON file, path passed explicitly as `--config <path>` to
 every `yak-harness` invocation. Parsed with a zod schema at startup,
@@ -117,10 +117,10 @@ non-zero.
 
 | constant | value | origin |
 |---|---|---|
-| gate re-prompt limit | `1` | ticket 04 |
-| max run attempts | `2` | ticket 05 |
-| accepted `author_association` | `OWNER`, `MEMBER`, `COLLABORATOR` | ticket 04 |
-| `yak:` status prefix + the six status names | fixed | ticket 03 |
+| gate re-prompt limit | `1` | decision 04 |
+| max run attempts | `2` | decision 05 |
+| accepted `author_association` | `OWNER`, `MEMBER`, `COLLABORATOR` | decision 04 |
+| `yak:` status prefix + the six status names | fixed | decision 03 |
 | `.harness/` location | `<yakRepoPath>/.harness` | — |
 | all marker-comment formats | fixed strings | machine contract |
 
@@ -257,7 +257,7 @@ fully hands-free, and a substantial feature stops three times.
 
 ---
 
-## 5. Run ↔ issue linkage (ticket 01)
+## 5. Run ↔ issue linkage (decision 01)
 
 yak generates its own run ids (`engine/run.ts` `generateRunId`:
 ISO-time-with-colons-stripped + 4 hex) and there is no `yak run --id`.
@@ -323,7 +323,7 @@ This file is operational scratch: a stale one makes the kill a no-op,
 and the full scan remains authoritative for everything else.
 
 (This subsumes an earlier `.harness/launching` breadcrumb from
-ticket 02: the same file is written *before* the spawn as a
+decision 02: the same file is written *before* the spawn as a
 launch-in-progress marker, then rewritten with the pid and kept.)
 
 ### 5.5 Orphans and stale markers
@@ -345,7 +345,7 @@ launch-in-progress marker, then rewritten with the pid and kept.)
 
 ---
 
-## 6. The tick (ticket 02)
+## 6. The tick (decision 02)
 
 ### 6.1 Shape — `observe → plan → apply`
 
@@ -448,7 +448,7 @@ safe with no operator setup.
 
 ---
 
-## 7. Gate bridge (ticket 04, prototype `prototype-04-gate-bridge.md`)
+## 7. Gate bridge (decision 04, prototype `prototype-gate-bridge.md`)
 
 When a run suspends on a `gate`, `pending/<step>.request.json` carries
 `rendered` (a freeform prose string the workflow author wrote — the
@@ -551,7 +551,7 @@ observation.
 
 ---
 
-## 8. Label lifecycle (ticket 03)
+## 8. Label lifecycle (decision 03)
 
 ### 8.1 The label set
 
@@ -637,7 +637,7 @@ performs **zero destructive cleanup**:
 
 ---
 
-## 9. Failure and retry (ticket 05)
+## 9. Failure and retry (decision 05)
 
 ### 9.1 Auto-retry on `failed`
 
@@ -703,7 +703,7 @@ No `@`-mention in v1.
 
 ---
 
-## 10. Deployment (ticket 07)
+## 10. Deployment (decision 07)
 
 ### 10.1 Repo and coupling
 
@@ -783,7 +783,7 @@ Overlap is the harness's concern (§6.6), not the operator's. A
 
 ## 12. Candidate yak changes (noted, not depended on)
 
-Collected from the tickets. Each would simplify the harness; none is a
+Collected from the decision docs. Each would simplify the harness; none is a
 prerequisite. All three filed against yak proper 2026-09-06:
 
 - **`yak run --tag <string>`** ([lchase/yak#22](https://github.com/lchase/yak/issues/22))
@@ -814,5 +814,5 @@ prerequisite. All three filed against yak proper 2026-09-06:
    issue to `yak:pr-open` against a real local yak.
 5. `apply` for E (orphan/stale) and §9 (retry, stalled kill).
 6. The gate bridge (§7) — A and B. The prototype
-   (`prototype-04-gate-bridge.md`) is the acceptance reference.
+   (`prototype-gate-bridge.md`) is the acceptance reference.
 7. `tick.log`, `--dry-run`, the lock file, packaging.
