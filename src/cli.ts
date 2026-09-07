@@ -9,7 +9,9 @@ import { argv } from "node:process";
 import { fileURLToPath } from "node:url";
 import { realApplyDeps } from "./apply.js";
 import { ConfigError, loadConfig } from "./config.js";
+import { harnessDir } from "./constants.js";
 import { formatReport, runDoctor } from "./doctor.js";
+import { acquireTickLock, LockHeld } from "./lock.js";
 import { ObserveError, realObserveDeps } from "./observe.js";
 import { runTick } from "./tick.js";
 
@@ -51,6 +53,25 @@ interface CliIo {
   err(text: string): void;
 }
 
+/** `runTick` with `ObserveError` mapped to a clean exit-1 (spec §10.5). */
+function runTickGuarded(
+  config: ReturnType<typeof loadConfig>,
+  io: CliIo,
+  dryRun: boolean,
+  dir: string,
+): number {
+  try {
+    return runTick(
+      config,
+      { observe: realObserveDeps(config), apply: realApplyDeps(config) },
+      { io, dryRun, harnessDir: dir },
+    );
+  } catch (err) {
+    if (err instanceof ObserveError) throw new CliExit(1, err.message);
+    throw err;
+  }
+}
+
 /** Run one CLI invocation. Returns the process exit code; performs no `process.exit`. */
 export function cli(argv: string[], io: CliIo): number {
   try {
@@ -77,18 +98,28 @@ export function cli(argv: string[], io: CliIo): number {
       return report.ok ? 0 : 1;
     }
 
+    const dir = harnessDir(config.yakRepoPath);
+
+    // A `--dry-run` changes nothing, so it neither takes the overlap lock
+    // (spec §6.6) nor writes `tick.log` (spec §10.5).
+    if (dryRun) {
+      return runTickGuarded(config, io, true, dir);
+    }
+
+    let lock: ReturnType<typeof acquireTickLock>;
     try {
-      return runTick(
-        config,
-        {
-          observe: realObserveDeps(config),
-          apply: realApplyDeps(config),
-        },
-        { io, dryRun },
-      );
+      lock = acquireTickLock(dir);
     } catch (err) {
-      if (err instanceof ObserveError) throw new CliExit(1, err.message);
+      if (err instanceof LockHeld) {
+        io.err(`${err.message} — exiting (overlap is safe)`);
+        return 0;
+      }
       throw err;
+    }
+    try {
+      return runTickGuarded(config, io, false, dir);
+    } finally {
+      lock.release();
     }
   } catch (err) {
     if (err instanceof CliExit) {

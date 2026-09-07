@@ -42,6 +42,7 @@ export {
   schemaSha,
   validateAnswer,
 } from "./gate-bridge.js";
+export { acquireTickLock, LockHeld, type TickLock } from "./lock.js";
 export {
   classifyRun,
   findOrphans,
@@ -105,6 +106,7 @@ export {
   type TickIo,
   type TickOptions,
 } from "./tick.js";
+export { appendTickLog, type TickLogRecord } from "./tick-log.js";
 export {
   CURRENT_STATUS_VALUES,
   type CurrentStatus,

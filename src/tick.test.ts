@@ -1,6 +1,10 @@
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { ApplyDeps } from "./apply.js";
 import type { Config } from "./config.js";
+import { TICK_LOG_NAME } from "./constants.js";
 import type { ObserveDeps } from "./observe.js";
 import { runTick } from "./tick.js";
 
@@ -121,6 +125,38 @@ describe("runTick", () => {
     );
     expect(code).toBe(1);
     expect(c.err.join("\n")).toMatch(/aborted/);
+  });
+
+  test("harnessDir set → one well-formed JSON line with counts + actions", () => {
+    const c = capture();
+    const apply = recordingApplyDeps();
+    const dir = mkdtempSync(join(tmpdir(), "yh-tick-"));
+    runTick(
+      CONFIG,
+      { observe: observeOneBacklogIssue(), apply: apply.deps },
+      { io: c.io, harnessDir: dir },
+    );
+    const lines = readFileSync(join(dir, TICK_LOG_NAME), "utf8")
+      .split("\n")
+      .filter(Boolean);
+    expect(lines).toHaveLength(1);
+    const rec = JSON.parse(lines[0] ?? "");
+    expect(rec.counts.issues).toBe(1);
+    expect(typeof rec.durationMs).toBe("number");
+    expect(rec.actions.join("\n")).toMatch(/launched run run-x for #1/);
+    expect(rec.errors).toEqual([]);
+  });
+
+  test("--dry-run does not write tick.log even when harnessDir is set", () => {
+    const c = capture();
+    const apply = recordingApplyDeps();
+    const dir = mkdtempSync(join(tmpdir(), "yh-tick-"));
+    runTick(
+      CONFIG,
+      { observe: observeOneBacklogIssue(), apply: apply.deps },
+      { io: c.io, dryRun: true, harnessDir: dir },
+    );
+    expect(() => readFileSync(join(dir, TICK_LOG_NAME), "utf8")).toThrow();
   });
 
   test("a quiet backlog → no actions, exit 0", () => {
