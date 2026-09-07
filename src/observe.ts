@@ -118,6 +118,25 @@ export interface Orphan {
   runId: string;
   class: RunClass | "pending-only";
   live: boolean;
+  /**
+   * When a durable `.harness/runs/<run-id>.json` pid file survives for
+   * this run, the issue + launch time it recorded — the *only* basis on
+   * which `apply` may repost the lost marker and restore the linkage
+   * (spec §5.5). `null` → not recoverable; a live one then wedges new
+   * launches until a human clears it. The harness never guesses an issue.
+   */
+  recovery: { issue: number; launchedAt: string } | null;
+}
+
+/**
+ * A durable `.harness/runs/<run-id>.json` pid file (spec §5.4) — dropped
+ * once a launch has resolved its run id, kept for the §9.3 stalled kill
+ * and, here, for orphan recovery (spec §5.5).
+ */
+export interface RunBreadcrumb {
+  runId: string;
+  issue: number;
+  launchedAt: string;
 }
 
 /** An issue whose last marker points at a run id with no `.runs/` dir (spec §5.5). */
@@ -232,6 +251,14 @@ export interface ObserveDeps {
    * risks a duplicate launch, never a lost one.
    */
   listLaunchBreadcrumbs(): number[];
+  /**
+   * The durable `.harness/runs/<run-id>.json` pid files (spec §5.4) — one
+   * per launch that got as far as resolving its run id. `plan` uses the
+   * `issue` one records to recover an orphan whose marker never landed
+   * (spec §5.5). The transient `launching-<issue>.json` breadcrumbs are
+   * not included here.
+   */
+  listRunBreadcrumbs(): RunBreadcrumb[];
   /** A run's journal text (or `null`) plus a stalled-clock mtime (journal file, else run dir). */
   readRun(runId: string): { journal: string | null; mtimeMs: number | null };
   /**
@@ -444,6 +471,7 @@ export function findOrphans(
   pending: PendingRun[],
   markedRunIds: Set<string>,
   runDirSet: Set<string>,
+  breadcrumbs: Map<string, { issue: number; launchedAt: string }> = new Map(),
 ): Orphan[] {
   const orphans: Orphan[] = [];
   for (const run of runs) {
@@ -452,11 +480,17 @@ export function findOrphans(
       runId: run.id,
       class: run.class,
       live: run.class !== "ok" && run.class !== "failed",
+      recovery: breadcrumbs.get(run.id) ?? null,
     });
   }
   for (const p of pending) {
     if (markedRunIds.has(p.runId) || runDirSet.has(p.runId)) continue;
-    orphans.push({ runId: p.runId, class: "pending-only", live: true });
+    orphans.push({
+      runId: p.runId,
+      class: "pending-only",
+      live: true,
+      recovery: breadcrumbs.get(p.runId) ?? null,
+    });
   }
   return orphans;
 }
@@ -536,6 +570,13 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
 
   const markedRunIds = new Set(Object.keys(link.runToIssue));
 
+  // Pre-spawn recovery breadcrumbs (spec §5.5): the only sanctioned way
+  // to re-link an orphan run to an issue — never a guess.
+  const recovery = new Map<string, { issue: number; launchedAt: string }>();
+  for (const b of deps.listRunBreadcrumbs()) {
+    recovery.set(b.runId, { issue: b.issue, launchedAt: b.launchedAt });
+  }
+
   // 2. `yak pending` — run id, open steps, per-step kind + first rendered line.
   const pending: PendingRun[] = deps.yakPending().map((p) => ({
     runId: p.runId,
@@ -581,7 +622,7 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     gateReplies: [], // ticket #6 — gate bridge
     runToIssue: link.runToIssue,
     issueToRun: link.issueToRun,
-    orphans: findOrphans(runs, pending, markedRunIds, runDirSet),
+    orphans: findOrphans(runs, pending, markedRunIds, runDirSet, recovery),
     stale: findStaleMarkers(issues, runDirSet),
     linkageFaults: link.faults,
   };

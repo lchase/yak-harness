@@ -22,6 +22,7 @@ function observeOneBacklogIssue(): ObserveDeps {
     listIssues: () => [{ number: 1, title: "do a thing", labels: ["yak"] }],
     listComments: () => [],
     listLaunchBreadcrumbs: () => [],
+    listRunBreadcrumbs: () => [],
     yakPending: () => [],
     listRunDirs: () => [],
     readRun: () => ({ journal: null, mtimeMs: null }),

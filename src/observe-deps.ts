@@ -31,6 +31,7 @@ import type {
   RawIssue,
   RawPendingRun,
   RawPr,
+  RunBreadcrumb,
 } from "./observe.js";
 
 /** Any failure reading the outside world during `observe` (spec §10.5). */
@@ -100,6 +101,38 @@ export function issueLabelSearch(qualifyingLabel: string): string {
     ...YAK_STATUS_NAMES.map((s) => `${YAK_STATUS_PREFIX}${s}`),
   ];
   return `label:${labels.map((l) => `"${l}"`).join(",")}`;
+}
+
+const RunBreadcrumbFileSchema = z.object({
+  pid: z.number(),
+  issue: z.number().int().positive(),
+  launchedAt: z.string().min(1),
+});
+
+/**
+ * Parse one `.harness/runs/<run-id>.json` pid file (spec §5.4). `runId`
+ * comes from the filename, not the body, and must be a safe id; a
+ * half-written or shape-wrong file yields `null` (a missing breadcrumb
+ * only ever costs a recovery, never correctness — spec §5.5).
+ */
+export function parseRunBreadcrumb(
+  fileName: string,
+  text: string,
+): RunBreadcrumb | null {
+  const m = /^(.+)\.json$/.exec(fileName);
+  if (!m || fileName.startsWith("launching-")) return null;
+  const runId = m[1]!;
+  if (!runIdIsSafe(runId)) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const res = RunBreadcrumbFileSchema.safeParse(json);
+  return res.success
+    ? { runId, issue: res.data.issue, launchedAt: res.data.launchedAt }
+    : null;
 }
 
 const GhIssueSchema = z.object({
@@ -363,6 +396,30 @@ export function realObserveDeps(config: Config): ObserveDeps {
         }
       }
       return issues;
+    },
+
+    listRunBreadcrumbs: () => {
+      const dir = harnessRunsDir(config.yakRepoPath);
+      let names: string[];
+      try {
+        names = readdirSync(dir).filter(
+          (n) => n.endsWith(".json") && !n.startsWith("launching-"),
+        );
+      } catch {
+        return [];
+      }
+      const crumbs: RunBreadcrumb[] = [];
+      for (const name of names) {
+        let text: string;
+        try {
+          text = readFileSync(join(dir, name), "utf8");
+        } catch {
+          continue;
+        }
+        const parsed = parseRunBreadcrumb(name, text);
+        if (parsed) crumbs.push(parsed);
+      }
+      return crumbs;
     },
 
     readRun: (runId) => {

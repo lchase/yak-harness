@@ -65,6 +65,14 @@ const obs = (o: Partial<Observation>): Observation => ({
   ...o,
 });
 
+const orphan = (
+  o: Partial<import("./observe.js").Orphan> & {
+    runId: string;
+    class: import("./observe.js").Orphan["class"];
+    live: boolean;
+  },
+): import("./observe.js").Orphan => ({ recovery: null, ...o });
+
 const kinds = (actions: Action[]): string[] => actions.map((a) => a.kind);
 
 // ── deriveObserved ──────────────────────────────────────────────────
@@ -234,7 +242,7 @@ describe("plan — precedence", () => {
     const actions = plan(
       obs({
         issues: [issue({ number: 1 })],
-        orphans: [{ runId: "x", class: "alive", live: true }],
+        orphans: [orphan({ runId: "x", class: "alive", live: true })],
       }),
     );
     expect(kinds(actions)).toEqual(["flag-orphan"]);
@@ -244,7 +252,7 @@ describe("plan — precedence", () => {
     const actions = plan(
       obs({
         issues: [issue({ number: 1 })],
-        orphans: [{ runId: "x", class: "failed", live: false }],
+        orphans: [orphan({ runId: "x", class: "failed", live: false })],
       }),
     );
     expect(kinds(actions)).toEqual(["flag-orphan", "launch-run"]);
@@ -279,7 +287,7 @@ describe("plan — precedence", () => {
             answer: { decision: "proceed" },
           },
         ],
-        orphans: [{ runId: "orph", class: "failed", live: false }], // E, non-live
+        orphans: [orphan({ runId: "orph", class: "failed", live: false })], // E, non-live
       }),
     );
     expect(kinds(actions)).toEqual([

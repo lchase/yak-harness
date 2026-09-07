@@ -8,6 +8,7 @@ import {
   parsePendingJson,
   parsePrListJson,
   parsePrViewJson,
+  parseRunBreadcrumb,
   prUrlLooksValid,
   runIdIsSafe,
 } from "./observe-deps.js";
@@ -20,6 +21,33 @@ describe("runIdIsSafe", () => {
     for (const bad of ["../etc", "..", "a/b", "a\\b", "/abs", ".hidden", ""]) {
       expect(runIdIsSafe(bad)).toBe(false);
     }
+  });
+});
+
+describe("parseRunBreadcrumb", () => {
+  const body = JSON.stringify({
+    pid: 4242,
+    issue: 7,
+    launchedAt: "2026-09-06T09:00:00.000Z",
+  });
+
+  test("well-formed pid file → runId from filename + issue + launchedAt", () => {
+    expect(parseRunBreadcrumb("2026-09-06T09-12-44Z-a1b2.json", body)).toEqual({
+      runId: "2026-09-06T09-12-44Z-a1b2",
+      issue: 7,
+      launchedAt: "2026-09-06T09:00:00.000Z",
+    });
+  });
+
+  test("the transient launching-<issue> breadcrumb is not a run breadcrumb", () => {
+    expect(parseRunBreadcrumb("launching-7.json", body)).toBeNull();
+  });
+
+  test("path-unsafe filename, non-JSON, or wrong shape → null", () => {
+    expect(parseRunBreadcrumb("../evil.json", body)).toBeNull();
+    expect(parseRunBreadcrumb("r.json", "{ half-written")).toBeNull();
+    expect(parseRunBreadcrumb("r.json", '{"pid":1}')).toBeNull();
+    expect(parseRunBreadcrumb("r.txt", body)).toBeNull();
   });
 });
 

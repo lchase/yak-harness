@@ -25,7 +25,12 @@ import {
 } from "./constants.js";
 import { parseJournal } from "./observe.js";
 import { runIdIsSafe } from "./observe-deps.js";
-import type { Action, LaunchRunAction, RelabelAction } from "./plan.js";
+import type {
+  Action,
+  FlagOrphanAction,
+  LaunchRunAction,
+  RelabelAction,
+} from "./plan.js";
 import { RunStartedEventSchema } from "./yak-schemas.js";
 
 /** A harness fault during `apply` — aborts the tick, leaves state for a human. */
@@ -70,8 +75,14 @@ export interface ApplyResult {
   applied: string[];
   /** Non-fatal problems — the tick still exits 0 unless `aborted` is set. */
   errors: string[];
-  /** Actions this ticket does not yet handle (A / B / E / escalation). */
+  /** Actions this ticket does not yet handle (A / B / escalation). */
   skipped: string[];
+  /**
+   * Informational lines that are neither a side effect nor a problem —
+   * e.g. an already-terminal orphan logged once and left alone (spec
+   * §5.5). Printed by the tick; they never change the exit code.
+   */
+  notes: string[];
   /** A harness fault stopped the tick partway (spec §5.1). */
   aborted: boolean;
 }
@@ -232,6 +243,63 @@ function applyLaunch(
   );
 }
 
+// ── E — orphan / stale-marker flagging (spec §5.5) ───────────────────
+
+/**
+ * Handle one orphan run (a `.runs/` dir or `yak pending` entry with no
+ * marker on any scanned issue, spec §5.5):
+ *
+ *   - **recoverable** — a `.harness/runs/<run-id>.json` breadcrumb names
+ *     the issue. Repost the lost marker there (`branch` is the
+ *     deterministic `yak/<runId>`); that re-links the run, so it is not
+ *     an orphan next tick. The only sanctioned re-link — never a guess.
+ *   - **live, not recoverable** — log loudly. `plan` already counted it
+ *     against the cap and suppressed D this tick; it stays wedged until a
+ *     human clears it. Strictly safer than mislinking a gate comment.
+ *   - **already terminal (`ok` / `failed`)** — nothing to bridge. One
+ *     note, then the tick carries on.
+ *
+ * Idempotent: a recovered orphan stops being an orphan, and the
+ * non-recoverable branches only log.
+ */
+function applyFlagOrphan(
+  action: FlagOrphanAction,
+  deps: ApplyDeps,
+  result: ApplyResult,
+): void {
+  const { runId, orphanClass, recovery } = action;
+
+  if (recovery) {
+    if (!runIdIsSafe(runId)) {
+      result.errors.push(
+        `orphan run ${runId} has a recovery breadcrumb but an unsafe run id — not re-linking`,
+      );
+      return;
+    }
+    const branch = branchForRun(runId);
+    deps.postComment(
+      recovery.issue,
+      runMarkerComment({ run: runId, branch, launched: recovery.launchedAt }),
+    );
+    result.applied.push(
+      `recovered orphan run ${runId} → #${recovery.issue}: marker comment reposted`,
+    );
+    return;
+  }
+
+  if (action.live) {
+    result.errors.push(
+      `LIVE ORPHAN run=${runId} (${orphanClass}) — no marker on any issue and no recovery breadcrumb; ` +
+        `counted against the cap, new launches wedged until a human clears it (spec §5.5)`,
+    );
+    return;
+  }
+
+  result.notes.push(
+    `orphan run ${runId} (${orphanClass}) is already terminal — nothing to bridge, ignoring (spec §5.5)`,
+  );
+}
+
 // ── apply ────────────────────────────────────────────────────────────
 
 /**
@@ -248,6 +316,7 @@ export function apply(
     applied: [],
     errors: [],
     skipped: [],
+    notes: [],
     aborted: false,
   };
   let launched = false;
@@ -273,9 +342,7 @@ export function apply(
           result.skipped.push(`${action.kind} on #${action.issue} (ticket #6)`);
           break;
         case "flag-orphan":
-          result.skipped.push(
-            `flag-orphan ${action.runId} (${action.orphanClass}) (ticket #5b)`,
-          );
+          applyFlagOrphan(action, deps, result);
           break;
       }
     } catch (err) {

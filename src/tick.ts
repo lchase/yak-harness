@@ -76,6 +76,7 @@ function tallyRuns(classes: string[]): string {
 
 function reportApply(result: ApplyResult, io: TickIo): void {
   for (const line of result.applied) io.out(`  ${line}`);
+  for (const line of result.notes) io.out(`  note: ${line}`);
   for (const line of result.skipped) io.out(`  skipped: ${line}`);
   for (const line of result.errors) io.err(`  error: ${line}`);
   if (result.aborted)

@@ -87,7 +87,20 @@ export interface FlagOrphanAction {
   runId: string;
   orphanClass: string;
   live: boolean;
-  /** Idempotency: the loud-log / needs-human marker is not already present. */
+  /**
+   * Set when a `.harness/runs/<run-id>.json` breadcrumb names the issue
+   * this run belongs to (spec §5.5). `apply` reposts the lost marker to
+   * `issue` with `branch` = `yak/<runId>` and this `launchedAt`, which
+   * re-links the run — so next tick it is no longer an orphan.
+   * `null` → not recoverable; a live one wedges launches (`plan` already
+   * suppressed D this tick) until a human intervenes. Never a guess.
+   */
+  recovery: { issue: number; launchedAt: string } | null;
+  /**
+   * Idempotency: a recovered orphan stops being an orphan once its
+   * marker is back, so the repost never repeats; a non-recoverable
+   * orphan has no issue to comment on — `apply` only logs it.
+   */
   guard: { notAlreadyFlagged: true };
 }
 
@@ -157,6 +170,7 @@ export function plan(obs: Observation): Action[] {
     runId: o.runId,
     orphanClass: o.class,
     live: o.live,
+    recovery: o.recovery,
     guard: { notAlreadyFlagged: true },
   }));
   const liveOrphan = obs.orphans.some((o) => o.live);
