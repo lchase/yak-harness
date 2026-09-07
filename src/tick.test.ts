@@ -72,6 +72,8 @@ const recordingApplyDeps = (): { deps: ApplyDeps; calls: string[] } => {
       postComment: () => calls.push("comment"),
       addLabel: (_i, l) => calls.push(`+label ${l}`),
       removeLabel: () => calls.push("-label"),
+      processInfo: () => null,
+      killProcess: (pid) => calls.push(`kill ${pid}`),
     },
   };
 };

@@ -63,6 +63,7 @@ function fixtureDeps(
       runId: string;
       issue: number;
       launchedAt: string;
+      pid: number;
     }[];
   } = {},
 ): ObserveDeps {
@@ -384,6 +385,8 @@ describe("findOrphans", () => {
     class: cls,
     lastEventAt: null,
     journalMtimeMs: null,
+    mtimeAgeMs: null,
+    recordedPid: null,
     terminalFailure: null,
     pr: null,
   });
@@ -565,6 +568,33 @@ describe("observe", () => {
     ).toBe("stalled");
   });
 
+  test("mtimeAgeMs is now - mtime; recordedPid comes from the run breadcrumb", () => {
+    const mtime = NOW.getTime() - 46 * 60_000;
+    const run = observe(
+      CONFIG,
+      fixtureDeps({
+        mtimeOverrides: { "run-stalled": mtime },
+        runBreadcrumbs: [
+          {
+            runId: "run-stalled",
+            issue: 42,
+            launchedAt: "2026-09-06T08:00:00Z",
+            pid: 9931,
+          },
+        ],
+      }),
+    ).runs.find((r) => r.id === "run-stalled");
+    expect(run?.mtimeAgeMs).toBe(46 * 60_000);
+    expect(run?.recordedPid).toBe(9931);
+  });
+
+  test("recordedPid is null when no breadcrumb survives for the run", () => {
+    expect(
+      observe(CONFIG, fixtureDeps()).runs.find((r) => r.id === "run-stalled")
+        ?.recordedPid,
+    ).toBeNull();
+  });
+
   test("PR state resolved only for ok runs", () => {
     const byId = Object.fromEntries(obs.runs.map((r) => [r.id, r.pr]));
     expect(byId["run-ok-pr-open"]).toBe("open");
@@ -600,6 +630,7 @@ describe("observe", () => {
             runId: "run-orphan",
             issue: 99,
             launchedAt: "2026-09-06T08:00:00Z",
+            pid: 5150,
           },
         ],
       }),

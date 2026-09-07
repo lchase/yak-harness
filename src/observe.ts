@@ -103,6 +103,19 @@ export interface RunObservation {
    * (spec §6.2). `null` only when neither could be stat'd.
    */
   journalMtimeMs: number | null;
+  /**
+   * `now - journalMtimeMs` in ms — how long the run has been quiet. Feeds
+   * the §9.4 escalation text for a `stalled` run ("no journal activity for
+   * <duration>"). Computed in `observe` so `plan` stays clock-free (spec
+   * §6.1). `null` when the mtime is unknown.
+   */
+  mtimeAgeMs: number | null;
+  /**
+   * pid recorded in the durable `.harness/runs/<id>.json` file (spec §5.4),
+   * kept for the §9.3 stalled kill. `null` when no pid file survives for
+   * this run.
+   */
+  recordedPid: number | null;
   /** Typed failure for a `failed` run, pulled from the journal (spec §9.4). `null` otherwise. */
   terminalFailure: StepFailure | null;
   /** PR disposition — set only for `class: 'ok'` (spec §8.3). */
@@ -137,6 +150,8 @@ export interface RunBreadcrumb {
   runId: string;
   issue: number;
   launchedAt: string;
+  /** The detached `yak run` pid — the target of the §9.3 stalled kill. */
+  pid: number;
 }
 
 /** An issue whose last marker points at a run id with no `.runs/` dir (spec §5.5). */
@@ -596,8 +611,10 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
   // Pre-spawn recovery breadcrumbs (spec §5.5): the only sanctioned way
   // to re-link an orphan run to an issue — never a guess.
   const recovery = new Map<string, { issue: number; launchedAt: string }>();
+  const recordedPids = new Map<string, number>();
   for (const b of deps.listRunBreadcrumbs()) {
     recovery.set(b.runId, { issue: b.issue, launchedAt: b.launchedAt });
+    recordedPids.set(b.runId, b.pid);
   }
 
   // 2. `yak pending` — run id, open steps, per-step kind + first rendered line.
@@ -626,6 +643,8 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
       class: runClass,
       lastEventAt,
       journalMtimeMs: mtimeMs,
+      mtimeAgeMs: mtimeMs === null ? null : now.getTime() - mtimeMs,
+      recordedPid: recordedPids.get(id) ?? null,
       terminalFailure,
       pr:
         runClass === "ok"

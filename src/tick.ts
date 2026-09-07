@@ -32,7 +32,7 @@ export function describeAction(a: Action): string {
     case "launch-run":
       return `launch-run   #${a.issue} → yak:${a.to}${a.retry ? ` (retry ${a.retry.attempt}/${MAX_RUN_ATTEMPTS})` : ""}`;
     case "relabel":
-      return `relabel      #${a.issue} ${a.from} → yak:${a.to}${a.escalate ? " (escalate)" : ""}`;
+      return `relabel      #${a.issue} ${a.from} → yak:${a.to}${a.escalate ? " (escalate)" : ""}${a.stall ? ` (kill pid ${a.stall.pid ?? "none"})` : ""}`;
     case "post-gate-comment":
       return `post-gate    #${a.issue} run=${a.runId} step=${a.stepId}`;
     case "write-answer-and-resume":

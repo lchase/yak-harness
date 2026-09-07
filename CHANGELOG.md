@@ -95,6 +95,21 @@ file is maintained by hand until a release-please pipeline lands
   `LaunchRunAction` gains an optional `retry`; `RelabelAction` gains
   `escalation`; `transition.launchTarget()` names the post-launch label
   so neither `plan` nor `apply` hard-codes it.
+- Stalled-run detection + kill (`src/apply.ts`, `src/apply-deps.ts`,
+  spec §6.2, §9.3). A run classified `stalled` (`alive` + journal mtime
+  older than `stalledAfterMinutes` — already a pure function of the
+  journal in `observe`) now drives an `apply`-side kill: read the pid
+  from the durable `.harness/runs/<id>.json` file, verify it is alive
+  **and** a `yak` process (pid-reuse guard via `ps`), `SIGTERM` it, then
+  relabel `yak:failed` and post the one §9.4 escalation comment carrying
+  the stall duration and the kill outcome ("process killed" /
+  "process already gone" / "non-yak process — left alone" /
+  "no pid on record"). The kill runs **before** the label moves so a
+  tick dying mid-kill retries the whole transition rather than stranding
+  a live process under the `yak:failed` trap row. `stalled` never
+  retries. `RunObservation` gains `mtimeAgeMs` + `recordedPid`;
+  `RunBreadcrumb` gains `pid`; `RelabelAction` gains `stall`; `ApplyDeps`
+  gains `processInfo` + `killProcess`.
 - `realApplyDeps` (`src/apply-deps.ts`) — the write-side `gh` / `yak` /
   filesystem boundary: detached `spawn` + `unref`, idempotent `gh issue
   edit` label ops (absent-label removal swallowed), JSON breadcrumbs
