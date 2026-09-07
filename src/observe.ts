@@ -134,10 +134,43 @@ export interface LinkageFault {
   issues: number[];
 }
 
+/**
+ * A valid, schema-checked human reply to a bridged gate, ready to
+ * resume (spec §7). Produced by the gate bridge (ticket #6); `plan`
+ * consumes it as data. Empty until then.
+ */
+export interface GateReply {
+  issue: number;
+  runId: string;
+  stepId: string;
+  answer: Record<string, unknown>;
+}
+
 export interface Observation {
   issues: IssueObservation[];
   runs: RunObservation[];
   pending: PendingRun[];
+  /**
+   * The `maxConcurrent` cap (spec §4), carried on the `Observation` so
+   * `plan` stays a pure function of a single value (spec §6.1).
+   */
+  maxConcurrent: number;
+  /**
+   * Issue numbers with an in-progress `.harness/runs/*` launch
+   * breadcrumb — a spawn that has not yet posted its marker (spec §5.4).
+   * `plan` treats one as "launch already under way". Empty until the
+   * detached-launch work (ticket #7); a missing breadcrumb only ever
+   * risks a duplicate launch, never a lost one.
+   */
+  launchBreadcrumbs: number[];
+  /**
+   * `${runId}\t${stepId}` for gate steps whose prompt comment the
+   * harness has already posted (spec §7.1). Populated by the gate
+   * bridge (ticket #6); empty until then.
+   */
+  gatesPosted: string[];
+  /** Valid, unanswered gate replies ready to resume (spec §7). Empty until ticket #6. */
+  gateReplies: GateReply[];
   /** `runId → issueNumber`, rebuilt from marker comments every tick (spec §5.3). First-seen wins. */
   runToIssue: Record<string, number>;
   /** `issueNumber → currentRunId` — the inverse, last-marker-wins, held issues excluded. */
@@ -528,6 +561,10 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     issues,
     runs,
     pending,
+    maxConcurrent: config.maxConcurrent,
+    launchBreadcrumbs: [], // ticket #7 — detached launch + `.harness/runs/*`
+    gatesPosted: [], // ticket #6 — gate bridge
+    gateReplies: [], // ticket #6 — gate bridge
     runToIssue: link.runToIssue,
     issueToRun: link.issueToRun,
     orphans: findOrphans(runs, pending, markedRunIds, runDirSet),
