@@ -24,11 +24,23 @@ import {
   type YakStatus,
 } from "./constants.js";
 import {
+  type GateFailure,
+  type GateField,
+  type GateReply,
+  type GateReprompt,
+  readFields,
+  resolveGates,
+  schemaSha,
+} from "./gate-bridge.js";
+import {
+  GatePendingRequestSchema,
   type JournalEvent,
   JournalEventSchema,
   type StepFailure,
   StepFailureSchema,
 } from "./yak-schemas.js";
+
+export type { GateFailure, GateReply, GateReprompt } from "./gate-bridge.js";
 
 // ── Observation shape ──────────────────────────────────────────────────
 
@@ -78,12 +90,37 @@ export interface IssueObservation {
   attemptCount: number;
 }
 
+/**
+ * The bridged gate's `pending/<stepId>.request.json`, read + boundary-
+ * validated (spec §7.1). `null` on {@link PendingStep} for a non-gate step
+ * or an unreadable / invalid file — the latter routes the issue to
+ * `yak:failed` (spec §7.1).
+ */
+export interface GateRequest {
+  /** Freeform prose the harness posts verbatim (CLAUDE.md invariant 1). */
+  rendered: string;
+  /** JSON Schema object; walked to build the reply contract (spec §7.1). */
+  answerSchema: Record<string, unknown>;
+  /** Short digest of `answerSchema` — the `schema-sha` marker field. */
+  schemaSha: string;
+  /**
+   * `answerSchema` walked into contract fields (spec §7.1), computed once
+   * here so `plan` and `resolveGates` never re-derive it. `null` when the
+   * schema is not a flat scalar/enum object — then `bridgeError` says why
+   * and the issue routes to `yak:failed`.
+   */
+  fields: GateField[] | null;
+  bridgeError: string | null;
+}
+
 /** One open gate step from `yak pending` (spec §6.2). */
 export interface PendingStep {
   stepId: string;
   kind: string;
   /** First line of the step's `.rendered` prose — enough for `plan` to route; not parsed here. */
   renderedFirstLine: string;
+  /** The gate request, when `kind === "gate"` and the file is readable + valid (spec §7). */
+  gate: GateRequest | null;
 }
 
 export interface PendingRun {
@@ -168,18 +205,6 @@ export interface LinkageFault {
   issues: number[];
 }
 
-/**
- * A valid, schema-checked human reply to a bridged gate, ready to
- * resume (spec §7). Produced by the gate bridge (ticket #6); `plan`
- * consumes it as data. Empty until then.
- */
-export interface GateReply {
-  issue: number;
-  runId: string;
-  stepId: string;
-  answer: Record<string, unknown>;
-}
-
 export interface Observation {
   issues: IssueObservation[];
   runs: RunObservation[];
@@ -199,12 +224,16 @@ export interface Observation {
   launchBreadcrumbs: number[];
   /**
    * `${runId}\t${stepId}` for gate steps whose prompt comment the
-   * harness has already posted (spec §7.1). Populated by the gate
-   * bridge (ticket #6); empty until then.
+   * harness has already posted — a `<!-- yak-gate … -->` marker is on the
+   * issue (spec §7.1).
    */
   gatesPosted: string[];
-  /** Valid, unanswered gate replies ready to resume (spec §7). Empty until ticket #6. */
+  /** Valid, unanswered gate replies ready to write + resume (spec §7.5). */
   gateReplies: GateReply[];
+  /** First malformed replies awaiting the one re-prompt (spec §7.3). */
+  gateReprompts: GateReprompt[];
+  /** Gates the harness cannot bridge — `plan` routes the issue to `yak:failed` (spec §7.1, §7.3). */
+  gateFailures: GateFailure[];
   /** `runId → issueNumber`, rebuilt from marker comments every tick (spec §5.3). First-seen wins. */
   runToIssue: Record<string, number>;
   /** `issueNumber → currentRunId` — the inverse, last-marker-wins, held issues excluded. */
@@ -282,6 +311,13 @@ export interface ObserveDeps {
   listRunBreadcrumbs(): RunBreadcrumb[];
   /** A run's journal text (or `null`) plus a stalled-clock mtime (journal file, else run dir). */
   readRun(runId: string): { journal: string | null; mtimeMs: number | null };
+  /**
+   * Raw parsed JSON of `<runsDir>/<runId>/pending/<stepId>.request.json`
+   * (spec §7.1) — the gate's `rendered` + `answerSchema`. `null` when the
+   * file is absent or not JSON; the pure layer validates the shape with
+   * {@link GatePendingRequestSchema} and routes a miss to `yak:failed`.
+   */
+  readGateRequest(runId: string, stepId: string): unknown | null;
   /**
    * The raw PR record for an `ok` run (spec §8.3): reads the `pr-url`
    * artifact and `gh pr view`s it, falling back to a `--head` branch
@@ -550,6 +586,31 @@ export function findStaleMarkers(
   return stale;
 }
 
+/**
+ * Read + boundary-validate one gate step's `request.json` (spec §7.1,
+ * §10.1). A missing / non-JSON / shape-wrong file yields `null`; `plan`
+ * routes that gate to `yak:failed` rather than guessing a contract.
+ */
+function readGateRequest(
+  deps: ObserveDeps,
+  runId: string,
+  stepId: string,
+): GateRequest | null {
+  const raw = deps.readGateRequest(runId, stepId);
+  if (raw === null || raw === undefined) return null;
+  const parsed = GatePendingRequestSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const answerSchema = parsed.data.answerSchema as Record<string, unknown>;
+  const walked = readFields(answerSchema);
+  return {
+    rendered: parsed.data.rendered,
+    answerSchema,
+    schemaSha: schemaSha(answerSchema),
+    fields: walked.ok ? walked.fields : null,
+    bridgeError: walked.ok ? null : walked.reason,
+  };
+}
+
 // ── Orchestration ────────────────────────────────────────────────────
 
 /**
@@ -569,6 +630,7 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     return {
       raw,
       reading,
+      comments: comments ?? [],
       markers: comments ? parseMarkers(comments) : [],
       failedMarkers: comments ? parseFailedMarkers(comments) : [],
       commentsUnreadable: comments === null,
@@ -617,13 +679,18 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     recordedPids.set(b.runId, b.pid);
   }
 
-  // 2. `yak pending` — run id, open steps, per-step kind + first rendered line.
+  // 2. `yak pending` — run id, open steps, per-step kind + first rendered
+  //    line, plus the full gate request for `kind: "gate"` steps (spec §7).
   const pending: PendingRun[] = deps.yakPending().map((p) => ({
     runId: p.runId,
     steps: p.steps.map((step) => ({
       stepId: step.stepId,
       kind: step.kind,
       renderedFirstLine: step.rendered.split("\n", 1)[0] ?? "",
+      gate:
+        step.kind === "gate"
+          ? readGateRequest(deps, p.runId, step.stepId)
+          : null,
     })),
   }));
 
@@ -653,15 +720,55 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     };
   });
 
-  // 4. Derived sets (spec §5.5).
+  // 4. Gate bridge (spec §7) — resolve every suspended run's open gate
+  //    steps against its issue's comments. Pure once `observe` has the
+  //    request file + comments in hand.
+  const suspendedRunIds = new Set(
+    runs.filter((r) => r.class === "suspended").map((r) => r.id),
+  );
+  const commentsByIssue = new Map(
+    scanned.map((s) => [s.raw.number, s.comments]),
+  );
+  const gateStepInputs = issues
+    .filter(
+      (i) =>
+        !i.fault &&
+        i.currentRunId !== null &&
+        suspendedRunIds.has(i.currentRunId),
+    )
+    .flatMap((i) => {
+      const steps =
+        pending.find((p) => p.runId === i.currentRunId)?.steps ?? [];
+      const comments = commentsByIssue.get(i.number) ?? [];
+      return steps
+        .filter((s) => s.kind === "gate")
+        .map((s) => ({
+          issue: i.number,
+          runId: i.currentRunId as string,
+          stepId: s.stepId,
+          request: s.gate
+            ? {
+                answerSchema: s.gate.answerSchema,
+                fields: s.gate.fields,
+                bridgeError: s.gate.bridgeError,
+              }
+            : null,
+          comments,
+        }));
+    });
+  const gates = resolveGates(gateStepInputs);
+
+  // 5. Derived sets (spec §5.5).
   return {
     issues,
     runs,
     pending,
     maxConcurrent: config.maxConcurrent,
     launchBreadcrumbs: deps.listLaunchBreadcrumbs(),
-    gatesPosted: [], // ticket #6 — gate bridge
-    gateReplies: [], // ticket #6 — gate bridge
+    gatesPosted: gates.gatesPosted,
+    gateReplies: gates.gateReplies,
+    gateReprompts: gates.gateReprompts,
+    gateFailures: gates.gateFailures,
     runToIssue: link.runToIssue,
     issueToRun: link.issueToRun,
     orphans: findOrphans(runs, pending, markedRunIds, runDirSet, recovery),

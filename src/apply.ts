@@ -1,11 +1,11 @@
 // The tick's write phase (spec §6.1) — the only place, alongside
 // `observe-deps.ts`, that touches GitHub / yak / the filesystem.
 //
-// This wires **C** (relabel, incl. the §9.4 escalation comment and the
-// §9.3 stalled kill), **D** (launch), **E** (orphan / stale flagging) and
-// the §9.1 auto-retry (a fresh `yak run` off a `recoverable` failure).
-// A / B (gate bridge, ticket #6) are recorded as skipped, not silently
-// dropped.
+// This wires **A** / **A′** / **B** (gate bridge — post prompt, re-prompt,
+// write-answer-and-resume, spec §7), **C** (relabel, incl. the §9.4
+// escalation comment, the §9.3 stalled kill, and the §7 gate-failure
+// escalation), **D** (launch), **E** (orphan / stale flagging) and the
+// §9.1 auto-retry (a fresh `yak run` off a `recoverable` failure).
 //
 // Every action is idempotent and guarded by a predicate `plan` already
 // evaluated from the `Observation` (spec §6.4). `apply` re-checks nothing
@@ -19,6 +19,7 @@
 import type { Config } from "./config.js";
 import {
   failedComment,
+  gateFailedComment,
   LAUNCH_POLL_INTERVAL_MS,
   LAUNCH_POLL_TIMEOUT_MS,
   launchingBreadcrumbName,
@@ -28,13 +29,17 @@ import {
   stalledEscalation,
   YAK_STATUS_PREFIX,
 } from "./constants.js";
+import { answeredCommentBody } from "./gate-bridge.js";
 import { parseJournal } from "./observe.js";
 import { runIdIsSafe } from "./observe-deps.js";
 import type {
   Action,
   FlagOrphanAction,
   LaunchRunAction,
+  PostGateCommentAction,
+  PostGateRepromptAction,
   RelabelAction,
+  WriteAnswerAndResumeAction,
 } from "./plan.js";
 import { RunStartedEventSchema } from "./yak-schemas.js";
 
@@ -69,6 +74,17 @@ export interface ApplyDeps {
   removeBreadcrumb(name: string): void;
   /** Post a comment on an issue. */
   postComment(issue: number, body: string): void;
+  /**
+   * Write `<runsDir>/<runId>/pending/<stepId>.answer.json` (spec §7.5).
+   * Overwrite-safe: a retried tick rewrites the identical file.
+   */
+  writeAnswer(
+    runId: string,
+    stepId: string,
+    answer: Record<string, unknown>,
+  ): void;
+  /** `yak resume <runId>` in `yakRepoPath` (spec §7.5). Re-derives from the journal. */
+  resumeRun(runId: string): void;
   /** Add a label to an issue (no-op when already present). */
   addLabel(issue: number, label: string): void;
   /** Remove a label from an issue (no-op when absent). */
@@ -88,7 +104,7 @@ export interface ApplyResult {
   applied: string[];
   /** Non-fatal problems — the tick still exits 0 unless `aborted` is set. */
   errors: string[];
-  /** Actions this ticket does not yet handle (A / B / escalation). */
+  /** Reserved for actions a future ticket does not yet handle. */
   skipped: string[];
   /**
    * Informational lines that are neither a side effect nor a problem —
@@ -171,24 +187,40 @@ function applyRelabel(
   }
 
   if (action.escalate) {
-    // The one §9.4 escalation comment, guarded by its `<!-- yak-failed
+    // The one escalation comment, guarded by its `<!-- yak-failed
     // run=<id> -->` marker (which `plan` already checked was absent).
     // Posted before the label moves: a crash between the two leaves the
-    // issue still `yak:running` with the comment up, and next tick's
-    // `plan` sees the marker and moves the label without re-posting.
+    // issue still on its prior status with the comment up, and next
+    // tick's `plan` sees the marker and moves the label without re-posting.
     const run = action.runId ?? "unknown";
-    const detail = stallDetail ??
-      action.escalation ?? {
-        broke: "the run needs a human",
-        tried: "see the run journal",
-      };
-    deps.postComment(
-      action.issue,
-      failedComment({ run, broke: detail.broke, tried: detail.tried }),
-    );
-    result.applied.push(
-      `posted §9.4 escalation comment on #${action.issue} for run ${run}`,
-    );
+    if (action.gateFail) {
+      // A gate the harness cannot bridge (spec §7.1, §7.3) — the fix is a
+      // hand-written answer file, never a relaunch.
+      deps.postComment(
+        action.issue,
+        gateFailedComment({
+          run,
+          stepId: action.gateFail.stepId,
+          broke: action.gateFail.broke,
+        }),
+      );
+      result.applied.push(
+        `posted gate-failed escalation on #${action.issue} for run ${run} (step ${action.gateFail.stepId})`,
+      );
+    } else {
+      const detail = stallDetail ??
+        action.escalation ?? {
+          broke: "the run needs a human",
+          tried: "see the run journal",
+        };
+      deps.postComment(
+        action.issue,
+        failedComment({ run, broke: detail.broke, tried: detail.tried }),
+      );
+      result.applied.push(
+        `posted §9.4 escalation comment on #${action.issue} for run ${run}`,
+      );
+    }
   }
 
   if (action.from !== "none") {
@@ -380,6 +412,58 @@ function applyFlagOrphan(
   );
 }
 
+// ── A / A′ / B — gate bridge (spec §7) ──────────────────────────────
+
+/** A — post the generated gate prompt (spec §7.1). Body composed in `plan`. */
+function applyGatePost(
+  action: PostGateCommentAction,
+  deps: ApplyDeps,
+  result: ApplyResult,
+): void {
+  deps.postComment(action.issue, action.body);
+  result.applied.push(
+    `posted gate prompt on #${action.issue} (run ${action.runId}, step ${action.stepId})`,
+  );
+}
+
+/** A′ — post the one re-prompt after a malformed reply (spec §7.3). */
+function applyGateReprompt(
+  action: PostGateRepromptAction,
+  deps: ApplyDeps,
+  result: ApplyResult,
+): void {
+  deps.postComment(action.issue, action.body);
+  result.applied.push(
+    `posted gate re-prompt (attempt ${action.attempt}) on #${action.issue} (run ${action.runId}, step ${action.stepId})`,
+  );
+}
+
+/**
+ * B — `writeAnswer` → `yak resume` → post the `yak-answered` marker, in
+ * that order (spec §7.5's intent: "redoes both … idempotent"). The marker
+ * is posted **last** on purpose: it is the "stop reading replies" signal
+ * (spec §7.2), so until the resume has actually been attempted it must
+ * not be up. A tick dying anywhere before the marker lands leaves no
+ * `yak-answered` marker, so next tick re-resolves the same first valid
+ * reply and redoes both — `writeAnswer` overwrites identically and
+ * `yak resume` re-derives from the journal.
+ */
+function applyResume(
+  action: WriteAnswerAndResumeAction,
+  deps: ApplyDeps,
+  result: ApplyResult,
+): void {
+  deps.writeAnswer(action.runId, action.stepId, action.answer);
+  deps.resumeRun(action.runId);
+  deps.postComment(
+    action.issue,
+    answeredCommentBody({ runId: action.runId, stepId: action.stepId }),
+  );
+  result.applied.push(
+    `answered gate ${action.stepId} on #${action.issue}, resumed run ${action.runId}`,
+  );
+}
+
 // ── apply ────────────────────────────────────────────────────────────
 
 /**
@@ -418,8 +502,13 @@ export function apply(
           launched = true;
           break;
         case "post-gate-comment":
+          applyGatePost(action, deps, result);
+          break;
+        case "post-gate-reprompt":
+          applyGateReprompt(action, deps, result);
+          break;
         case "write-answer-and-resume":
-          result.skipped.push(`${action.kind} on #${action.issue} (ticket #6)`);
+          applyResume(action, deps, result);
           break;
         case "flag-orphan":
           applyFlagOrphan(action, deps, result);

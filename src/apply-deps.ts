@@ -22,6 +22,7 @@ import { join } from "node:path";
 import type { ApplyDeps, SpawnedRun } from "./apply.js";
 import type { Config } from "./config.js";
 import { harnessRunsDir } from "./constants.js";
+import { runIdIsSafe } from "./observe-deps.js";
 
 const MAX_BUFFER = 8 * 1024 * 1024;
 
@@ -97,6 +98,30 @@ export function realApplyDeps(config: Config): ApplyDeps {
         "--body",
         body,
       ]);
+    },
+
+    writeAnswer: (runId, stepId, answer) => {
+      if (!runIdIsSafe(runId) || !runIdIsSafe(stepId)) {
+        throw new Error(`unsafe id for writeAnswer: ${runId} / ${stepId}`);
+      }
+      const dir = join(config.runsDir, runId, "pending");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, `${stepId}.answer.json`),
+        `${JSON.stringify(answer, null, 2)}\n`,
+      );
+    },
+
+    resumeRun: (runId) => {
+      if (!runIdIsSafe(runId)) {
+        throw new Error(`unsafe run id for resume: ${runId}`);
+      }
+      execFileSync("yak", ["resume", runId], {
+        cwd: config.yakRepoPath,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: MAX_BUFFER,
+      });
     },
 
     addLabel: (issue, label) => {

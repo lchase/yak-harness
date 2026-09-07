@@ -21,6 +21,7 @@
 // tick regardless of in-flight count; only **D** looks at the cap.
 
 import { MAX_RUN_ATTEMPTS, type YakStatus } from "./constants.js";
+import { gateCommentBody, repromptCommentBody } from "./gate-bridge.js";
 import type {
   IssueObservation,
   Observation,
@@ -41,8 +42,22 @@ export interface PostGateCommentAction {
   issue: number;
   runId: string;
   stepId: string;
+  /** The full comment body: verbatim `rendered` + the generated contract + marker. */
+  body: string;
   /** Idempotency: no `<!-- yak-gate run=<id> step=<stepId> … -->` marker yet. */
   guard: { noGateCommentFor: string };
+}
+
+/** A′ — the one re-prompt after a malformed reply (spec §7.3). */
+export interface PostGateRepromptAction {
+  kind: "post-gate-reprompt";
+  issue: number;
+  runId: string;
+  stepId: string;
+  /** Always `1` — `GATE_REPROMPT_LIMIT`. */
+  attempt: number;
+  /** The full re-prompt body: the faults named + the contract repeated + marker. */
+  body: string;
 }
 
 /** B — write the parsed answer, then `yak resume` (spec §7.5). */
@@ -88,6 +103,15 @@ export interface RelabelAction {
    * retries.
    */
   stall?: { durationText: string; pid: number | null };
+  /**
+   * Set when this move into `yak:failed` is a gate the harness cannot
+   * bridge (spec §7.1, §7.3) — a nested `answerSchema`, an unreadable
+   * request file, or a second malformed reply. `apply` posts
+   * {@link gateFailedComment} (hand-write the answer file, `yak resume`)
+   * instead of the relaunch-oriented §9.4 comment. Mutually exclusive
+   * with `stall` / `escalation`.
+   */
+  gateFail?: { stepId: string; broke: string };
   /** Idempotency: `gh` label add/remove is a no-op when already applied. */
   guard: { currentStatus: CurrentStatus };
 }
@@ -154,6 +178,7 @@ export interface FlagOrphanAction {
 
 export type Action =
   | PostGateCommentAction
+  | PostGateRepromptAction
   | WriteAnswerAndResumeAction
   | RelabelAction
   | LaunchRunAction
@@ -293,7 +318,7 @@ export function plan(obs: Observation): Action[] {
   const liveOrphan = obs.orphans.some((o) => o.live);
 
   // B — valid, unanswered gate replies (parsing / marker checks are the
-  // gate bridge's job, spec §7 / ticket #6; here they arrive pre-parsed).
+  // gate bridge's job in `observe`, spec §7; here they arrive pre-parsed).
   const bActions: WriteAnswerAndResumeAction[] = (obs.gateReplies ?? []).map(
     (r) => ({
       kind: "write-answer-and-resume",
@@ -312,6 +337,45 @@ export function plan(obs: Observation): Action[] {
   const breadcrumbs = new Set(obs.launchBreadcrumbs ?? []);
   const escalated = new Set(obs.escalated ?? []);
 
+  // A′ — one re-prompt per first-malformed reply (spec §7.3). Flat map,
+  // like B; `observe` guarantees at most one live re-prompt per gate.
+  const repromptActions: PostGateRepromptAction[] = (
+    obs.gateReprompts ?? []
+  ).map((rp) => ({
+    kind: "post-gate-reprompt",
+    issue: rp.issue,
+    runId: rp.runId,
+    stepId: rp.stepId,
+    attempt: rp.attempt,
+    body: repromptCommentBody({
+      runId: rp.runId,
+      stepId: rp.stepId,
+      attempt: rp.attempt,
+      faults: rp.faults,
+      fields: rp.fields,
+    }),
+  }));
+
+  // All broken gate steps for one issue collapse into a single move into
+  // `yak:failed`; every `broke` reason is kept in the escalation comment.
+  const gateFailByIssue = new Map<
+    number,
+    { runId: string; stepId: string; broke: string }
+  >();
+  for (const f of obs.gateFailures ?? []) {
+    const prev = gateFailByIssue.get(f.issue);
+    gateFailByIssue.set(
+      f.issue,
+      prev
+        ? {
+            runId: prev.runId,
+            stepId: prev.stepId,
+            broke: `${prev.broke}; ${f.broke}`,
+          }
+        : { runId: f.runId, stepId: f.stepId, broke: f.broke },
+    );
+  }
+
   const aActions: PostGateCommentAction[] = [];
   const cActions: RelabelAction[] = [];
   const retryCandidates: LaunchRunAction[] = [];
@@ -327,21 +391,55 @@ export function plan(obs: Observation): Action[] {
     const t = transition(current, observed);
 
     // A — a suspended run linked here: post each open gate step not yet
-    // surfaced. `gatesPosted` is empty until the gate bridge populates it.
+    // surfaced, whose `answerSchema` is a flat scalar/enum object. A gate
+    // with a nested / unreadable schema is an `obs.gateFailures` entry
+    // (handled below), never posted.
     if (observed === "suspended" && issue.currentRunId !== null) {
       const runId = issue.currentRunId;
       const pending = obs.pending.find((p) => p.runId === runId);
       for (const step of pending?.steps ?? []) {
-        if (!gatesPosted.has(gateKey(runId, step.stepId))) {
-          aActions.push({
-            kind: "post-gate-comment",
-            issue: issue.number,
+        if (step.kind !== "gate" || step.gate?.fields == null) continue;
+        const key = gateKey(runId, step.stepId);
+        if (gatesPosted.has(key)) continue;
+        aActions.push({
+          kind: "post-gate-comment",
+          issue: issue.number,
+          runId,
+          stepId: step.stepId,
+          body: gateCommentBody({
             runId,
             stepId: step.stepId,
-            guard: { noGateCommentFor: gateKey(runId, step.stepId) },
-          });
-        }
+            rendered: step.gate.rendered,
+            fields: step.gate.fields,
+            schemaSha: step.gate.schemaSha,
+          }),
+          guard: { noGateCommentFor: key },
+        });
       }
+    }
+
+    // Gate the harness cannot bridge → route the issue to `yak:failed`
+    // (spec §7.1, §7.3). The §8.2 table leaves `waiting` + `suspended` a
+    // noop ("re-prompt logic is §7.3, not here"), so this move is driven
+    // here, off `obs.gateFailures`. `transition(current, "terminal-bad")`
+    // yields the `failed` label without naming the string (invariant 4).
+    const gf = gateFailByIssue.get(issue.number);
+    if (
+      gf &&
+      issue.status !== "failed" &&
+      issue.status !== "done" &&
+      !escalated.has(gf.runId)
+    ) {
+      cActions.push({
+        kind: "relabel",
+        issue: issue.number,
+        from: current,
+        to: transition(current, "terminal-bad").next,
+        runId: gf.runId,
+        escalate: true,
+        gateFail: { stepId: gf.stepId, broke: gf.broke },
+        guard: { currentStatus: current },
+      });
     }
 
     // C — relabel when the §8.2 target differs from the current label.
@@ -350,6 +448,9 @@ export function plan(obs: Observation): Action[] {
     if (
       t.kind === "relabel" &&
       t.next !== issue.status &&
+      // A gate-bridge failure already emitted the one-way move to
+      // `yak:failed` for this issue above — don't also fire the table move.
+      !gateFailByIssue.has(issue.number) &&
       // A launch (backlog or a §9.1 retry) spawned for this issue this
       // tick but has not linked its marker yet: hold the one-way move
       // into `yak:failed` — with its permanent escalation comment — until
@@ -435,11 +536,13 @@ export function plan(obs: Observation): Action[] {
     }
   }
 
-  // Precedence: E, then B, then A, then C, then D (spec §6.3).
+  // Precedence: E, then B, then A (gate posts + re-prompts), then C,
+  // then D (spec §6.3).
   const actions: Action[] = [
     ...eActions,
     ...bActions,
     ...aActions,
+    ...repromptActions,
     ...cActions,
   ];
 

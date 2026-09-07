@@ -1,0 +1,15 @@
+{
+  "stepId": "confirm-scope",
+  "runId": "run-suspended",
+  "rendered": "Triage thinks this is a bug in the retry backoff (confidence 0.71).\nProceed with this scope, narrow it, or abort?",
+  "answerSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "type": "string", "enum": ["proceed", "narrow", "abort"] },
+      "notes": { "type": "string" }
+    },
+    "required": ["decision"]
+  },
+  "context": { "artifacts": ["triage"] },
+  "openedAt": "2026-09-06T09:14:00Z"
+}

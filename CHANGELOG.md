@@ -110,6 +110,37 @@ file is maintained by hand until a release-please pipeline lands
   retries. `RunObservation` gains `mtimeAgeMs` + `recordedPid`;
   `RunBreadcrumb` gains `pid`; `RelabelAction` gains `stall`; `ApplyDeps`
   gains `processInfo` + `killProcess`.
+- Gate bridge — `apply` actions **A** and **B** (`src/gate-bridge.ts`,
+  spec §7, prototype `docs/design/prototype-gate-bridge.md`). When a run
+  suspends on a `gate`, `observe` reads `pending/<stepId>.request.json`
+  (new `ObserveDeps.readGateRequest`, boundary-validated with
+  `GatePendingRequestSchema`) and resolves each open gate step against
+  the issue's comments — all pure (`resolveGates`); comments are ordered
+  by `createdAt`, not array position. `observe` walks each `answerSchema`
+  once (`readFields`, spec §7.1 type table) onto `PendingStep.gate`, so
+  `plan` and `resolveGates` never re-derive it; `plan` composes the gate
+  comment (`gateCommentBody` / `contractLines`, `schema-sha` marker) and
+  `apply` posts it. Replies are parsed with **no LLM** (`parseReply` —
+  line-based `key: value`, trim, flexible `:`, quote-strip,
+  case-insensitive enum, last field absorbs trailing lines, duplicate
+  field = malformed; a botched attempt needs a `:` *and* a field name as
+  a whole word), filtered to `author_association` ∈ {OWNER, MEMBER,
+  COLLABORATOR}, and validated with `ajv` before `writeAnswer`
+  (`validateAnswer`). A valid reply → `write-answer-and-resume`:
+  `writeAnswer` → `yak resume` → `<!-- yak-answered -->` marker, in that
+  order (marker last: it is the "stop reading replies" signal, so a
+  crash before it lands re-resolves the same reply and redoes both —
+  `ApplyDeps.writeAnswer` + `resumeRun`). A first malformed reply →
+  **one** `post-gate-reprompt`
+  naming the fault (`<!-- yak-gate-reprompt attempt=1 -->`); a second, or
+  a nested / unreadable `answerSchema`, → `yak:failed` with a
+  hand-write-the-answer-file escalation (`gateFailedComment`, driven off
+  `Observation.gateFailures` since the §8.2 table leaves `waiting` +
+  `suspended` a noop). A never-answered gate has no timeout — it holds
+  its `yak:waiting` slot. New `Observation` sections: `gateReprompts`,
+  `gateFailures` (`gatesPosted` / `gateReplies` now populated);
+  `PendingStep` gains `gate`; new `PostGateRepromptAction`,
+  `RelabelAction.gateFail`.
 - `realApplyDeps` (`src/apply-deps.ts`) — the write-side `gh` / `yak` /
   filesystem boundary: detached `spawn` + `unref`, idempotent `gh issue
   edit` label ops (absent-label removal swallowed), JSON breadcrumbs
