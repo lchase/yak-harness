@@ -1,9 +1,10 @@
 // The tick's write phase (spec §6.1) — the only place, alongside
 // `observe-deps.ts`, that touches GitHub / yak / the filesystem.
 //
-// This ticket (spec §13 step 4) wires **C** (relabel) and **D** (launch).
-// A / B (gate bridge, ticket #6) and E / §9 escalation (ticket #5b) are
-// recorded as skipped, not silently dropped.
+// This wires **C** (relabel, incl. the §9.4 escalation comment), **D**
+// (launch), **E** (orphan / stale flagging) and the §9.1 auto-retry (a
+// fresh `yak run` off a `recoverable` failure). A / B (gate bridge,
+// ticket #6) are recorded as skipped, not silently dropped.
 //
 // Every action is idempotent and guarded by a predicate `plan` already
 // evaluated from the `Observation` (spec §6.4). `apply` re-checks nothing
@@ -16,6 +17,7 @@
 
 import type { Config } from "./config.js";
 import {
+  failedComment,
   LAUNCH_POLL_INTERVAL_MS,
   LAUNCH_POLL_TIMEOUT_MS,
   launchingBreadcrumbName,
@@ -111,12 +113,22 @@ function applyRelabel(
   const target = `${YAK_STATUS_PREFIX}${action.to}`;
 
   if (action.escalate) {
-    // The one §9.4 escalation comment (terminal failure detail, retry
-    // disposition, human next-steps) lands with the E / §9 work in
-    // ticket #5b. The label move still happens now so the issue is
-    // visibly parked.
-    result.skipped.push(
-      `#${action.issue}: §9.4 escalation comment for run ${action.runId ?? "?"} (deferred)`,
+    // The one §9.4 escalation comment, guarded by its `<!-- yak-failed
+    // run=<id> -->` marker (which `plan` already checked was absent).
+    // Posted before the label moves: a crash between the two leaves the
+    // issue still `yak:running` with the comment up, and next tick's
+    // `plan` sees the marker and moves the label without re-posting.
+    const run = action.runId ?? "unknown";
+    const detail = action.escalation ?? {
+      broke: "the run needs a human",
+      tried: "see the run journal",
+    };
+    deps.postComment(
+      action.issue,
+      failedComment({ run, broke: detail.broke, tried: detail.tried }),
+    );
+    result.applied.push(
+      `posted §9.4 escalation comment on #${action.issue} for run ${run}`,
     );
   }
 
@@ -235,11 +247,20 @@ function applyLaunch(
   );
   deps.removeBreadcrumb(launching);
 
-  // §8.2: a launch resolves straight to `yak:running` (no prior status).
+  // §8.2: a launch resolves straight to `yak:running`. A backlog launch
+  // has no prior status; a §9.1 retry moves off the failed run's label
+  // (usually `yak:running` already — then the remove is a no-op).
   deps.addLabel(action.issue, `${YAK_STATUS_PREFIX}${action.to}`);
+  const retryFrom = action.retry?.from;
+  if (retryFrom && retryFrom !== "none" && retryFrom !== action.to) {
+    deps.removeLabel(action.issue, `${YAK_STATUS_PREFIX}${retryFrom}`);
+  }
 
+  const how = action.retry
+    ? `retry attempt ${action.retry.attempt} (was ${action.retry.failedRunId})`
+    : "launched";
   result.applied.push(
-    `launched run ${runId} for #${action.issue} (pid ${spawned.pid}), set ${YAK_STATUS_PREFIX}${action.to}`,
+    `${how} run ${runId} for #${action.issue} (pid ${spawned.pid}), set ${YAK_STATUS_PREFIX}${action.to}`,
   );
 }
 

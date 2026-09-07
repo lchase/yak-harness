@@ -140,3 +140,11 @@ export function transition(
 ): Transition {
   return TABLE[current][observed];
 }
+
+/**
+ * The `yak:<status>` a fresh `yak run` resolves to (§8.2, the `∅ / none`
+ * launch cell). Used for a backlog launch (D) and — since it is a fresh
+ * `yak run` too — a §9.1 retry, so neither `plan` nor `apply` names the
+ * label string directly (CLAUDE.md invariant 4).
+ */
+export const launchTarget = (): YakStatus => TABLE.none.none.next;

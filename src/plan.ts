@@ -20,9 +20,18 @@
 // free a slot the same tick), **A**, **C**, **D**. A/B/C/E run every
 // tick regardless of in-flight count; only **D** looks at the cap.
 
-import type { YakStatus } from "./constants.js";
-import type { IssueObservation, Observation } from "./observe.js";
-import { type CurrentStatus, type Observed, transition } from "./transition.js";
+import { MAX_RUN_ATTEMPTS, type YakStatus } from "./constants.js";
+import type {
+  IssueObservation,
+  Observation,
+  RunObservation,
+} from "./observe.js";
+import {
+  type CurrentStatus,
+  launchTarget,
+  type Observed,
+  transition,
+} from "./transition.js";
 
 // ── Actions ──────────────────────────────────────────────────────────
 
@@ -55,8 +64,20 @@ export interface RelabelAction {
   to: YakStatus;
   /** The issue's current run, for the §9.4 escalation comment / logs. */
   runId: string | null;
-  /** Transition into `yak:failed` — `apply` posts the one §9.4 comment. */
+  /**
+   * Transition into `yak:failed` and no `<!-- yak-failed run=<id> -->`
+   * comment is on the issue yet — `apply` posts the one §9.4 escalation
+   * comment. `false` when the move is not into `yak:failed`, or the
+   * comment already landed (a tick died mid-transition); the label still
+   * moves either way.
+   */
   escalate: boolean;
+  /**
+   * The §9.4 comment body parts (`what broke` / `what was tried`),
+   * composed here as a pure function of the `Observation`. Present only
+   * when `escalate` is `true`.
+   */
+  escalation?: { broke: string; tried: string };
   /** Idempotency: `gh` label add/remove is a no-op when already applied. */
   guard: { currentStatus: CurrentStatus };
 }
@@ -71,13 +92,30 @@ export interface LaunchRunAction {
    * string is named in `apply`'s body (CLAUDE.md invariant 4).
    */
   to: YakStatus;
+  /**
+   * A §9.1 auto-retry rather than a fresh backlog launch: yak marked the
+   * terminal failure `recoverable` and the issue is under the attempt
+   * cap. Carries the failed run being retried and the `yak:<status>` the
+   * issue currently sits at (`apply` moves off it). `null` / absent for a
+   * backlog launch off the `∅` cell.
+   */
+  retry?: {
+    failedRunId: string;
+    from: CurrentStatus;
+    /** The attempt this launch begins — `attemptCount + 1` (spec §9.2). */
+    attempt: number;
+  };
   guard: {
     inFlightCount: number;
     maxConcurrent: number;
-    /** Issue carries no `yak-harness run=` marker. */
-    noMarkerComment: true;
+    /** Backlog launch only: issue carries no `yak-harness run=` marker. */
+    noMarkerComment?: true;
     /** No in-progress `.harness/runs/*` launch breadcrumb (spec §5.4). */
     noLaunchBreadcrumb: true;
+    /** Retry only: yak's own `recoverable` flag on the terminal failure. */
+    recoverableFailure?: true;
+    /** Retry only: distinct-marker attempt count when planned (`< 2`). */
+    attemptCount?: number;
   };
 }
 
@@ -157,6 +195,65 @@ export function deriveObserved(
 const gateKey = (runId: string, stepId: string): string =>
   `${runId}\t${stepId}`;
 
+/**
+ * Compose the §9.4 escalation comment's `what broke` / `what was tried`
+ * lines — a pure function of the observed run behind a `yak:failed`
+ * transition. `run` is `undefined` for a stale marker (run dir gone).
+ */
+export function escalationDetail(
+  observed: Observed,
+  run: RunObservation | undefined,
+  attemptCount: number,
+): { broke: string; tried: string } {
+  if (observed === "ok-no-pr") {
+    return {
+      broke:
+        "the run finished ok but produced no PR — the workflow's open-pr step yielded nothing (workflow bug)",
+      tried: "not retried — a successful run is not a failure",
+    };
+  }
+  if (observed === "ok-pr-closed") {
+    return {
+      broke:
+        "the pull request was closed without being merged — the harness runs no PR-revision loop (spec §11)",
+      tried: "not retried — a closed PR is not a run failure",
+    };
+  }
+  if (!run) {
+    return {
+      broke:
+        "the run marker is stale — no `.runs/` directory for it (the box was replaced or `.runs/` was pruned)",
+      tried:
+        "not retried — a stale marker is never auto-relaunched (spec §8.2)",
+    };
+  }
+  if (run.class === "stalled") {
+    return {
+      broke: "the run stalled — no journal activity within the stalled window",
+      tried: "not retried — stalled runs never retry (spec §9.3)",
+    };
+  }
+  // class === "failed"
+  const tf = run.terminalFailure;
+  const broke = tf
+    ? `${tf.reason}: ${tf.detail}`
+    : "the run finished `failed` with no terminal StepFailure in its journal";
+  if (tf?.recoverable === true) {
+    // Recoverable, yet we still landed on `yak:failed` → the attempt cap
+    // is spent.
+    return {
+      broke,
+      tried: `attempt ${attemptCount} of ${MAX_RUN_ATTEMPTS} — the retry cap is spent, no further attempts`,
+    };
+  }
+  return {
+    broke,
+    tried: tf
+      ? `not retried — yak marked \`${tf.reason}\` not recoverable`
+      : "not retried — no recoverable signal",
+  };
+}
+
 // ── plan ─────────────────────────────────────────────────────────────
 
 export function plan(obs: Observation): Action[] {
@@ -193,9 +290,11 @@ export function plan(obs: Observation): Action[] {
 
   const gatesPosted = new Set(obs.gatesPosted ?? []);
   const breadcrumbs = new Set(obs.launchBreadcrumbs ?? []);
+  const escalated = new Set(obs.escalated ?? []);
 
   const aActions: PostGateCommentAction[] = [];
   const cActions: RelabelAction[] = [];
+  const retryCandidates: LaunchRunAction[] = [];
   const dCandidates: LaunchRunAction[] = [];
 
   for (const issue of obs.issues) {
@@ -226,16 +325,63 @@ export function plan(obs: Observation): Action[] {
     }
 
     // C — relabel when the §8.2 target differs from the current label.
-    if (t.kind === "relabel" && t.next !== issue.status) {
-      cActions.push({
-        kind: "relabel",
-        issue: issue.number,
-        from: current,
-        to: t.next,
-        runId: issue.currentRunId,
-        escalate: t.next === "failed",
-        guard: { currentStatus: current },
-      });
+    // A move into `yak:failed` off a `recoverable` run failure under the
+    // attempt cap is pre-empted by a §9.1 retry (a fresh `yak run`, D).
+    if (
+      t.kind === "relabel" &&
+      t.next !== issue.status &&
+      // A launch (backlog or a §9.1 retry) spawned for this issue this
+      // tick but has not linked its marker yet: hold the one-way move
+      // into `yak:failed` — with its permanent escalation comment — until
+      // the spawn resolves or orphan-recovery re-links it (spec §5.4,
+      // §5.5). Mirrors D's breadcrumb guard. Benign moves still proceed.
+      !(t.next === "failed" && breadcrumbs.has(issue.number))
+    ) {
+      const runId = issue.currentRunId;
+      const run = runId ? obs.runs.find((r) => r.id === runId) : undefined;
+
+      const retryable =
+        t.next === "failed" &&
+        issue.qualifying && // a retry is a fresh launch — the scope defence still applies (spec §5.3)
+        run?.class === "failed" &&
+        run.terminalFailure?.recoverable === true &&
+        issue.attemptCount < MAX_RUN_ATTEMPTS;
+
+      if (retryable) {
+        retryCandidates.push({
+          kind: "launch-run",
+          issue: issue.number,
+          to: launchTarget(),
+          retry: {
+            failedRunId: runId!,
+            from: current,
+            attempt: issue.attemptCount + 1,
+          },
+          guard: {
+            inFlightCount,
+            maxConcurrent: obs.maxConcurrent,
+            noLaunchBreadcrumb: true,
+            recoverableFailure: true,
+            attemptCount: issue.attemptCount,
+          },
+        });
+      } else {
+        const escalate = t.next === "failed" && !escalated.has(runId ?? "");
+        cActions.push({
+          kind: "relabel",
+          issue: issue.number,
+          from: current,
+          to: t.next,
+          runId,
+          escalate,
+          ...(escalate
+            ? {
+                escalation: escalationDetail(observed, run, issue.attemptCount),
+              }
+            : {}),
+          guard: { currentStatus: current },
+        });
+      }
     }
 
     // D — the only cap-consuming action. Candidate only; capped below.
@@ -268,13 +414,16 @@ export function plan(obs: Observation): Action[] {
   ];
 
   // D — at most one launch per tick, and only with a free slot and no
-  // live orphan wedging the diff (spec §5.1, §5.5, §6.3).
+  // live orphan wedging the diff (spec §5.1, §5.5, §6.3). A §9.1 retry is
+  // a launch too; retries go first so started work finishes before new
+  // work starts.
+  const launchCandidates = [...retryCandidates, ...dCandidates];
   if (
     !liveOrphan &&
-    dCandidates.length > 0 &&
+    launchCandidates.length > 0 &&
     inFlightCount < obs.maxConcurrent
   ) {
-    actions.push(dCandidates[0]!);
+    actions.push(launchCandidates[0]!);
   }
 
   return actions;

@@ -44,6 +44,7 @@ export {
   type PendingRun,
   type PendingStep,
   type PrState,
+  parseFailedMarkers,
   parseJournal,
   parseMarkers,
   prStateFrom,
@@ -74,6 +75,7 @@ export {
 export {
   type Action,
   deriveObserved,
+  escalationDetail,
   type FlagOrphanAction,
   type LaunchRunAction,
   type PostGateCommentAction,
@@ -91,6 +93,7 @@ export {
 export {
   CURRENT_STATUS_VALUES,
   type CurrentStatus,
+  launchTarget,
   OBSERVED_VALUES,
   type Observed,
   type Transition,
