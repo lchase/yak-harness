@@ -98,7 +98,7 @@ steps:
     produces: scopeDecision
 
   - id: design
-    needs: [assessment]
+    needs: [assessment, scopeDecision]
     skipIf: "!assessment.needsDesign"
     agent:
       prompt:
@@ -119,7 +119,7 @@ steps:
     produces: design
 
   - id: design-review
-    needs: [assessment, input]
+    needs: [assessment, input, design]
     skipIf: "!assessment.needsDesign"
     gate:
       schema:
@@ -139,7 +139,7 @@ steps:
     produces: designDecision
 
   - id: plan
-    needs: [assessment, input]
+    needs: [assessment, input, scopeDecision, designDecision]
     agent:
       prompt:
         inline: |
