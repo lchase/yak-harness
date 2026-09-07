@@ -227,14 +227,25 @@ export function scanPendingRuns(
   for (const runId of runDirs) {
     if (!runIdIsSafe(runId)) continue;
     const pendingDir = join(runsDir, runId, "pending");
-    let files: string[];
+    let entries: string[];
     try {
-      files = readdirSync(pendingDir).filter((n) =>
-        n.endsWith(".request.json"),
-      );
+      entries = readdirSync(pendingDir);
     } catch {
       continue; // no pending/ dir — this run has no open gate
     }
+    // yak does not delete `<step>.request.json` once answered, and the
+    // harness writes `<step>.answer.json` beside it — so a gate is only
+    // still open when its request has no sibling answer file.
+    const answered = new Set(
+      entries
+        .filter((n) => n.endsWith(".answer.json"))
+        .map((n) => n.slice(0, -".answer.json".length)),
+    );
+    const files = entries.filter(
+      (n) =>
+        n.endsWith(".request.json") &&
+        !answered.has(n.slice(0, -".request.json".length)),
+    );
     const steps: RawPendingRun["steps"] = [];
     for (const file of files) {
       let raw: unknown;

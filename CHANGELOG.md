@@ -19,6 +19,10 @@ file is maintained by hand until a release-please pipeline lands
 
 ### Fixed
 
+- A gate whose `pending/<step>.request.json` has a sibling
+  `<step>.answer.json` is no longer reported as open — yak leaves the
+  request file in place after an answer, so without this every
+  harness-bridged gate looked permanently pending.
 - Gate bridge holds `yak resume` until **every** concurrently-open gate
   on a run has an answer file — a run suspended on two parallel gates
   (e.g. `confirm-scope` + `design-review`) was resumed after the first

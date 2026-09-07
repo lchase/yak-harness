@@ -194,6 +194,31 @@ describe("scanPendingRuns", () => {
     expect(scanPendingRuns(runsDir, warn)).toEqual([]);
   });
 
+  test("a request with a sibling answer file is no longer open", () => {
+    writeRequest("r5", "confirm-scope", {
+      kind: "gate",
+      stepId: "confirm-scope",
+      runId: "r5",
+      rendered: "x",
+    });
+    writeRequest("r5", "design-review", {
+      kind: "gate",
+      stepId: "design-review",
+      runId: "r5",
+      rendered: "y",
+    });
+    writeFileSync(
+      join(runsDir, "r5", "pending", "confirm-scope.answer.json"),
+      "{}",
+    );
+    expect(scanPendingRuns(runsDir, warn)).toEqual([
+      {
+        runId: "r5",
+        steps: [{ stepId: "design-review", kind: "gate", rendered: "y" }],
+      },
+    ]);
+  });
+
   test("defaults a missing rendered to the empty string", () => {
     writeRequest("r3", "s", { kind: "gate", stepId: "s", runId: "r3" });
     expect(scanPendingRuns(runsDir, warn)[0]?.steps[0]?.rendered).toBe("");
