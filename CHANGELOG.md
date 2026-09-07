@@ -19,6 +19,11 @@ file is maintained by hand until a release-please pipeline lands
 
 ### Fixed
 
+- `yak resume` exiting non-zero because the run re-parked on a *later*
+  gate (e.g. `checkpoint` / `approve-pr`) no longer aborts the tick. The
+  gate bridge now checks the journal: a run that advanced or reached a
+  terminal event is a success; only a non-zero resume that moved nothing
+  is a fault (found driving spec §26 end-to-end).
 - `implement-change` workflow: `confirm-scope` now gates before `design`
   / `design-review` / `plan` (was parallel), and `design-review` waits
   for `design`. Previously `confirm-scope` and `design-review` opened as

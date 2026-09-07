@@ -141,12 +141,24 @@ export function realApplyDeps(config: Config): ApplyDeps {
       if (!runIdIsSafe(runId)) {
         throw new Error(`unsafe run id for resume: ${runId}`);
       }
-      execFileSync("yak", ["resume", runId], {
-        cwd: config.yakRepoPath,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        maxBuffer: MAX_BUFFER,
-      });
+      try {
+        const out = execFileSync("yak", ["resume", runId], {
+          cwd: config.yakRepoPath,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          maxBuffer: MAX_BUFFER,
+        });
+        return { ok: true, output: out };
+      } catch (err) {
+        // Non-zero exit — `yak resume` does this whenever the run is left
+        // suspended (re-parked on a new gate). Hand the output back; the
+        // caller checks the journal to tell "advanced" from "broken".
+        const e = err as { status?: number; stdout?: string; stderr?: string };
+        if (typeof e.status === "number") {
+          return { ok: false, output: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+        }
+        throw err; // spawn failure — yak not on PATH, etc.
+      }
     },
 
     addLabel: (issue, label) => {

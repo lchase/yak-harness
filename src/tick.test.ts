@@ -76,7 +76,10 @@ const recordingApplyDeps = (): { deps: ApplyDeps; calls: string[] } => {
       removeBreadcrumb: (n) => calls.push(`remove ${n}`),
       writeAnswer: (r, s) => calls.push(`answer ${r} ${s}`),
       unansweredGates: () => [],
-      resumeRun: (r) => calls.push(`resume ${r}`),
+      resumeRun: (r) => {
+        calls.push(`resume ${r}`);
+        return { ok: true, output: "" };
+      },
       postComment: () => calls.push("comment"),
       addLabel: (_i, l) => calls.push(`+label ${l}`),
       removeLabel: () => calls.push("-label"),

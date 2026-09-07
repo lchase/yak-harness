@@ -39,6 +39,10 @@ interface FakeOpts {
   processes?: Record<number, { isYak: boolean }>;
   /** runId → step ids of gates still lacking an answer file (multi-gate resume guard). */
   unansweredGates?: Record<string, string[]>;
+  /** `yak resume` result per runId (default: ok). */
+  resumeResult?: Record<string, { ok: boolean; output: string }>;
+  /** Extra journal lines appended to a run's journal when `resumeRun` is called. */
+  resumeAppendsEvents?: Record<string, string>;
 }
 
 function fake(opts: FakeOpts = {}) {
@@ -68,7 +72,12 @@ function fake(opts: FakeOpts = {}) {
     writeAnswer: (runId, stepId, answer) =>
       calls.push(`answer ${runId}/${stepId} :: ${JSON.stringify(answer)}`),
     unansweredGates: (runId) => opts.unansweredGates?.[runId] ?? [],
-    resumeRun: (runId) => calls.push(`resume ${runId}`),
+    resumeRun: (runId) => {
+      calls.push(`resume ${runId}`);
+      const extra = opts.resumeAppendsEvents?.[runId];
+      if (extra) journals[runId] = `${journals[runId] ?? ""}\n${extra}`.trim();
+      return opts.resumeResult?.[runId] ?? { ok: true, output: "" };
+    },
     postComment: (issue, body) => {
       calls.push(`comment #${issue} :: ${body.split("\n").pop()}`);
       bodies.push(body);
@@ -581,6 +590,41 @@ describe("apply — gate bridge", () => {
       "resume r1",
       "comment #12 :: <!-- yak-answered run=r1 step=design-review -->",
     ]);
+  });
+
+  const resumeB = (stepId = "design-review"): Action => ({
+    kind: "write-answer-and-resume",
+    issue: 12,
+    runId: "r1",
+    stepId,
+    answer: { decision: "approve" },
+    guard: { runSuspended: true, noAnsweredMarkerFor: `r1\t${stepId}` },
+  });
+
+  test("B: `yak resume` exits non-zero but the run advanced → not a fault", () => {
+    const { deps, bodies } = fake({
+      journals: { r1: startedJournal("r1") },
+      resumeResult: {
+        r1: { ok: false, output: "still suspended: approve-pr" },
+      },
+      resumeAppendsEvents: {
+        r1: '{"t":"gate.opened","at":"2026-09-06T09:05:00Z","runId":"r1","stepId":"approve-pr"}',
+      },
+    });
+    const result = apply([resumeB()], CONFIG, deps);
+    expect(result.errors).toEqual([]);
+    expect(result.applied[0]).toMatch(/re-parked on a later gate/);
+    expect(bodies.some((b) => b.includes("yak-answered"))).toBe(true);
+  });
+
+  test("B: `yak resume` exits non-zero and nothing moved → ApplyError, tick aborts", () => {
+    const { deps } = fake({
+      journals: { r1: startedJournal("r1") },
+      resumeResult: { r1: { ok: false, output: "boom: bad run" } },
+    });
+    const result = apply([resumeB()], CONFIG, deps);
+    expect(result.aborted).toBe(true);
+    expect(result.errors[0]).toMatch(/did not advance/);
   });
 
   test("gate-failure relabel posts the hand-write escalation, then moves the label", () => {

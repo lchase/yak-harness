@@ -90,8 +90,14 @@ export interface ApplyDeps {
    * refuses a partial resume).
    */
   unansweredGates(runId: string): string[];
-  /** `yak resume <runId>` in `yakRepoPath` (spec §7.5). Re-derives from the journal. */
-  resumeRun(runId: string): void;
+  /**
+   * `yak resume <runId>` in `yakRepoPath` (spec §7.5). Re-derives from the
+   * journal. Returns `{ ok }` — `ok` is `false` when `yak resume` exits
+   * non-zero, which it does whenever the run is left suspended (it
+   * re-parked on a *new* gate). Only a spawn failure / unsafe id throws;
+   * the caller decides from the journal whether the run advanced.
+   */
+  resumeRun(runId: string): { ok: boolean; output: string };
   /** Add a label to an issue (no-op when already present). */
   addLabel(issue: number, label: string): void;
   /** Remove a label from an issue (no-op when absent). */
@@ -477,13 +483,32 @@ function applyResume(
     return;
   }
 
-  deps.resumeRun(action.runId);
+  const eventsBefore = parseJournal(deps.readJournal(action.runId)).length;
+  const { ok, output } = deps.resumeRun(action.runId);
+  const journalAfter = parseJournal(deps.readJournal(action.runId));
+  const advanced = journalAfter.length > eventsBefore;
+  const terminal = journalAfter.at(-1)?.t === "run.finished";
+
+  // `yak resume` exits non-zero when the run is left suspended — normal
+  // when it re-parks on a *new* gate (the multi-phase workflow does this
+  // at `checkpoint` / `approve-pr`). Trust the journal: if the run moved
+  // at all, or reached a terminal event, the resume did its job and the
+  // next tick's `observe` picks up the new state. Only a resume that
+  // exited non-zero *and* moved nothing is a real fault.
+  if (!ok && !advanced && !terminal) {
+    throw new ApplyError(
+      `resume ${action.runId} failed and the run did not advance: ${output.trim().split("\n")[0] ?? "no output"}`,
+    );
+  }
+
   deps.postComment(
     action.issue,
     answeredCommentBody({ runId: action.runId, stepId: action.stepId }),
   );
   result.applied.push(
-    `answered gate ${action.stepId} on #${action.issue}, resumed run ${action.runId}`,
+    advanced && !terminal
+      ? `answered gate ${action.stepId} on #${action.issue}, resumed run ${action.runId} (re-parked on a later gate)`
+      : `answered gate ${action.stepId} on #${action.issue}, resumed run ${action.runId}`,
   );
 }
 
