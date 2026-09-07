@@ -8,9 +8,7 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 
-const RepoSlug = z
-  .string()
-  .regex(/^[^/\s]+\/[^/\s]+$/, 'must be "owner/name"');
+const RepoSlug = z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'must be "owner/name"');
 
 /**
  * Raw config shape — exactly the keys an operator writes. `.strict()` so

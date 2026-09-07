@@ -133,10 +133,9 @@ export const OtherJournalEventSchema = JournalEventBase.extend({
   t: z
     .string()
     .min(1)
-    .refine(
-      (t) => !(REDECLARED_EVENT_TYPES as readonly string[]).includes(t),
-      { message: "use the dedicated schema for this event type" },
-    ),
+    .refine((t) => !(REDECLARED_EVENT_TYPES as readonly string[]).includes(t), {
+      message: "use the dedicated schema for this event type",
+    }),
 }).passthrough();
 
 export const JournalEventSchema = z.union([

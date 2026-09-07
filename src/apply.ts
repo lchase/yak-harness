@@ -16,16 +16,16 @@
 
 import type { Config } from "./config.js";
 import {
+  LAUNCH_POLL_INTERVAL_MS,
+  LAUNCH_POLL_TIMEOUT_MS,
   launchingBreadcrumbName,
   pidFileName,
   runMarkerComment,
-  LAUNCH_POLL_INTERVAL_MS,
-  LAUNCH_POLL_TIMEOUT_MS,
   YAK_STATUS_PREFIX,
 } from "./constants.js";
-import type { Action, LaunchRunAction, RelabelAction } from "./plan.js";
 import { parseJournal } from "./observe.js";
 import { runIdIsSafe } from "./observe-deps.js";
+import type { Action, LaunchRunAction, RelabelAction } from "./plan.js";
 import { RunStartedEventSchema } from "./yak-schemas.js";
 
 /** A harness fault during `apply` — aborts the tick, leaves state for a human. */
@@ -126,10 +126,7 @@ function applyRelabel(
  * timeout, or two+ at once, is a harness fault: abort, launch nothing
  * further.
  */
-function resolveRunId(
-  before: Set<string>,
-  deps: ApplyDeps,
-): string {
+function resolveRunId(before: Set<string>, deps: ApplyDeps): string {
   const deadline = deps.now().getTime() + LAUNCH_POLL_TIMEOUT_MS;
   for (;;) {
     const isNew = deps.listRunDirs().filter((d) => !before.has(d));

@@ -14,18 +14,28 @@
     "dist"
   ],
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "guard:deps": "node scripts/guard-deps.mjs",
+    "guard:changelog": "node scripts/guard-changelog.mjs",
+    "check": "npm run typecheck && npm run lint && npm run coverage && npm run build && npm run guard:deps && npm run guard:changelog"
   },
   "dependencies": {
     "ajv": "^8.17.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.12",
     "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "2.1.9",
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint + format (biome)
+        run: npm run lint
+      - name: test + coverage
+        run: npm run coverage
+      - name: build
+        run: npm run build
+
+      - name: guard — runtime deps stay {zod, ajv}, no @lchase/yak
+        run: npm run guard:deps
+      - name: guard — CHANGELOG updated with source changes
+        if: github.event_name == 'pull_request'
+        run: node scripts/guard-changelog.mjs "origin/${{ github.base_ref }}"
+
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      # Squash-merge uses the PR title as the commit subject — lint it as a
+      # Conventional Commit (spec §10.4).
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

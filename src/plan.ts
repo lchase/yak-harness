@@ -22,11 +22,7 @@
 
 import type { YakStatus } from "./constants.js";
 import type { IssueObservation, Observation } from "./observe.js";
-import {
-  transition,
-  type CurrentStatus,
-  type Observed,
-} from "./transition.js";
+import { type CurrentStatus, type Observed, transition } from "./transition.js";
 
 // ── Actions ──────────────────────────────────────────────────────────
 
@@ -145,7 +141,8 @@ export function deriveObserved(
   }
 }
 
-const gateKey = (runId: string, stepId: string): string => `${runId}\t${stepId}`;
+const gateKey = (runId: string, stepId: string): string =>
+  `${runId}\t${stepId}`;
 
 // ── plan ─────────────────────────────────────────────────────────────
 
@@ -249,7 +246,12 @@ export function plan(obs: Observation): Action[] {
   }
 
   // Precedence: E, then B, then A, then C, then D (spec §6.3).
-  const actions: Action[] = [...eActions, ...bActions, ...aActions, ...cActions];
+  const actions: Action[] = [
+    ...eActions,
+    ...bActions,
+    ...aActions,
+    ...cActions,
+  ];
 
   // D — at most one launch per tick, and only with a free slot and no
   // live orphan wedging the diff (spec §5.1, §5.5, §6.3).

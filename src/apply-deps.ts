@@ -19,9 +19,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import type { ApplyDeps, SpawnedRun } from "./apply.js";
 import type { Config } from "./config.js";
 import { harnessRunsDir } from "./constants.js";
-import type { ApplyDeps, SpawnedRun } from "./apply.js";
 
 const MAX_BUFFER = 8 * 1024 * 1024;
 

@@ -63,7 +63,7 @@ export function cli(argv: string[], io: CliIo): number {
       throw new CliExit(2, `--config <path> is required\n${USAGE}`);
     }
 
-    let config;
+    let config: ReturnType<typeof loadConfig>;
     try {
       config = loadConfig(configPath);
     } catch (err) {

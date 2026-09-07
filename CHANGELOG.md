@@ -111,6 +111,21 @@ file is maintained by hand until a release-please pipeline lands
 - `docs/design/yak-harness-and-yak-engine.*`: layered system diagram
   (Human → GitHub → yak-harness → yak engine).
 
+### Tooling
+
+- PR pre-checks: `.github/workflows/ci.yml` runs `typecheck`, Biome
+  lint+format, `vitest` with coverage thresholds (90% lines/statements,
+  85% branches/functions on the pure layer; the `*-deps.ts` shell-out
+  boundary + `cli.ts` are excluded by design), `build`, and two repo
+  guards — `guard:deps` (runtime deps stay `{zod, ajv}`, no `@lchase/yak`
+  anywhere) and `guard:changelog` (source change ⇒ CHANGELOG touched).
+  A `pr-title` job lints the PR title as a Conventional Commit (it
+  becomes the squash-merge subject).
+- Biome adopted as the single formatter + linter (`biome.json`); repo
+  reformatted once to its style. `npm run check` runs the whole gate
+  locally; a `pre-push` hook (via `.githooks/`, wired by `prepare`)
+  mirrors CI.
+
 ### Changed
 
 - Config default `workflow` is now `implement-change` (was `fix-defect`).

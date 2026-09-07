@@ -61,7 +61,7 @@ test("missing yak binary fails only its own check", () => {
   const report = runDoctor(
     config,
     healthyDeps({
-      run: (cmd, args) => {
+      run: (cmd, _args) => {
         if (cmd === "yak") throw new Error("command not found: yak");
         return "";
       },
@@ -73,9 +73,7 @@ test("missing yak binary fails only its own check", () => {
 
 test("yakRepoPath missing directory fails the git-repo check", () => {
   const report = runDoctor(config, healthyDeps({ fileExists: () => false }));
-  const c = report.checks.find((c) =>
-    c.name.startsWith("yakRepoPath"),
-  );
+  const c = report.checks.find((c) => c.name.startsWith("yakRepoPath"));
   expect(c?.ok).toBe(false);
   expect(c?.detail).toContain("does not exist");
 });
@@ -84,7 +82,7 @@ test("yakRepoPath not a git repo fails the check", () => {
   const report = runDoctor(
     config,
     healthyDeps({
-      run: (cmd, args) => {
+      run: (cmd, _args) => {
         if (cmd === "git") throw new Error("not a git repository");
         if (cmd === "yak") return "yak 1";
         return "";
@@ -150,7 +148,7 @@ test("unwritable .runs/ or .harness/ fails the write check", () => {
       },
     }),
   );
-  expect(
-    report.checks.find((c) => c.name.startsWith("write access"))?.ok,
-  ).toBe(false);
+  expect(report.checks.find((c) => c.name.startsWith("write access"))?.ok).toBe(
+    false,
+  );
 });

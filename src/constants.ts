@@ -88,8 +88,7 @@ export const runMarkerComment = (args: {
   run: string;
   branch: string;
   launched: string;
-}): string =>
-  `🐂 yak run started: \`${args.run}\`\n${runMarker(args)}`;
+}): string => `🐂 yak run started: \`${args.run}\`\n${runMarker(args)}`;
 
 /** Posted with a bridged gate prompt (spec §7.1). */
 export const gateMarker = (args: {
@@ -108,8 +107,10 @@ export const gateRepromptMarker = (args: {
   `<!-- yak-gate-reprompt run=${args.run} step=${args.step} attempt=${args.attempt} -->`;
 
 /** Written once a valid reply is parsed, before `yak resume` (spec §7.5). */
-export const gateAnsweredMarker = (args: { run: string; step: string }): string =>
-  `<!-- yak-answered run=${args.run} step=${args.step} -->`;
+export const gateAnsweredMarker = (args: {
+  run: string;
+  step: string;
+}): string => `<!-- yak-answered run=${args.run} step=${args.step} -->`;
 
 /**
  * Launch poll (spec §5.1 step 3): after the detached spawn, `apply` polls

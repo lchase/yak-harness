@@ -45,15 +45,15 @@ test("missing stalledAfterMinutes is a ConfigError naming the field", () => {
 });
 
 test("rejects a malformed repo slug", () => {
-  expect(() => loadConfig(writeConfig({ ...valid, repo: "not-a-slug" }))).toThrow(
-    /repo.*owner\/name/,
-  );
+  expect(() =>
+    loadConfig(writeConfig({ ...valid, repo: "not-a-slug" })),
+  ).toThrow(/repo.*owner\/name/);
 });
 
 test("rejects an unknown key", () => {
-  expect(() =>
-    loadConfig(writeConfig({ ...valid, maxConcurent: 3 })),
-  ).toThrow(ConfigError);
+  expect(() => loadConfig(writeConfig({ ...valid, maxConcurent: 3 }))).toThrow(
+    ConfigError,
+  );
 });
 
 test("rejects a non-positive stalledAfterMinutes", () => {
@@ -79,5 +79,7 @@ test("non-JSON file is a ConfigError", () => {
 });
 
 test("missing file is a ConfigError", () => {
-  expect(() => loadConfig("/no/such/config.json")).toThrow(/cannot read config/);
+  expect(() => loadConfig("/no/such/config.json")).toThrow(
+    /cannot read config/,
+  );
 });

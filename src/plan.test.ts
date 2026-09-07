@@ -1,16 +1,18 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { deriveObserved, plan, type Action } from "./plan.js";
 import type {
   IssueObservation,
   Observation,
   RunObservation,
 } from "./observe.js";
+import { type Action, deriveObserved, plan } from "./plan.js";
 
 // ── builders (plain literals — `plan` needs no mocks) ────────────────
 
-const issue = (o: Partial<IssueObservation> & { number: number }): IssueObservation => ({
+const issue = (
+  o: Partial<IssueObservation> & { number: number },
+): IssueObservation => ({
   title: `issue ${o.number}`,
   qualifying: true,
   status: null,
@@ -32,10 +34,14 @@ const linked = (
     status,
     currentRunId: runId,
     attemptCount: 1,
-    markers: [{ runId, branch: `yak/${runId}`, launched: "2026-01-01T00:00:00Z" }],
+    markers: [
+      { runId, branch: `yak/${runId}`, launched: "2026-01-01T00:00:00Z" },
+    ],
   });
 
-const run = (o: Partial<RunObservation> & { id: string; class: RunObservation["class"] }): RunObservation => ({
+const run = (
+  o: Partial<RunObservation> & { id: string; class: RunObservation["class"] },
+): RunObservation => ({
   lastEventAt: null,
   journalMtimeMs: null,
   terminalFailure: null,
@@ -157,7 +163,12 @@ describe("plan", () => {
       markers: [{ runId: "r", branch: "b", launched: "t" }],
     });
     expect(
-      plan(obs({ issues: [faulted], runs: [run({ id: "r", class: "ok", pr: "open" })] })),
+      plan(
+        obs({
+          issues: [faulted],
+          runs: [run({ id: "r", class: "ok", pr: "open" })],
+        }),
+      ),
     ).toEqual([]);
   });
 });
@@ -169,7 +180,11 @@ describe("plan — launch cap", () => {
     const actions = plan(
       obs({
         maxConcurrent: 5,
-        issues: [issue({ number: 1 }), issue({ number: 2 }), issue({ number: 3 })],
+        issues: [
+          issue({ number: 1 }),
+          issue({ number: 2 }),
+          issue({ number: 3 }),
+        ],
       }),
     );
     expect(kinds(actions)).toEqual(["launch-run"]);
@@ -197,11 +212,15 @@ describe("plan — launch cap", () => {
   test("an already-marked issue is never re-launched off the ∅ cell", () => {
     // marker present, run dir gone → stale → relabel to failed, no launch
     const actions = plan(
-      obs({ issues: [issue({
-        number: 1,
-        currentRunId: "gone",
-        markers: [{ runId: "gone", branch: "b", launched: "t" }],
-      })] }),
+      obs({
+        issues: [
+          issue({
+            number: 1,
+            currentRunId: "gone",
+            markers: [{ runId: "gone", branch: "b", launched: "t" }],
+          }),
+        ],
+      }),
     );
     expect(kinds(actions)).toEqual(["relabel"]);
     expect(actions[0]).toMatchObject({ to: "failed", escalate: true });
@@ -247,10 +266,18 @@ describe("plan — precedence", () => {
           run({ id: "r3", class: "ok", pr: "open" }),
         ],
         pending: [
-          { runId: "r2", steps: [{ stepId: "s2", kind: "gate", renderedFirstLine: "…" }] },
+          {
+            runId: "r2",
+            steps: [{ stepId: "s2", kind: "gate", renderedFirstLine: "…" }],
+          },
         ],
         gateReplies: [
-          { issue: 1, runId: "r1", stepId: "s1", answer: { decision: "proceed" } },
+          {
+            issue: 1,
+            runId: "r1",
+            stepId: "s1",
+            answer: { decision: "proceed" },
+          },
         ],
         orphans: [{ runId: "orph", class: "failed", live: false }], // E, non-live
       }),
@@ -271,7 +298,10 @@ describe("plan — precedence", () => {
         issues: [linked(2, "r2", "waiting")],
         runs: [run({ id: "r2", class: "suspended" })],
         pending: [
-          { runId: "r2", steps: [{ stepId: "s2", kind: "gate", renderedFirstLine: "…" }] },
+          {
+            runId: "r2",
+            steps: [{ stepId: "s2", kind: "gate", renderedFirstLine: "…" }],
+          },
         ],
         gatesPosted: ["r2\ts2"],
       }),
@@ -283,7 +313,10 @@ describe("plan — precedence", () => {
 // ── CLAUDE.md invariant 4: no label strings in `plan` ────────────────
 
 test("no `yak:` literal string appears in plan's body", () => {
-  const src = readFileSync(fileURLToPath(new URL("./plan.ts", import.meta.url)), "utf8");
+  const src = readFileSync(
+    fileURLToPath(new URL("./plan.ts", import.meta.url)),
+    "utf8",
+  );
   const code = src
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n")

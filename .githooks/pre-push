@@ -1,0 +1,7 @@
+#!/bin/sh
+# Local mirror of the CI gate (.github/workflows/ci.yml). Enabled by the
+# package.json "prepare" script (git config core.hooksPath .githooks).
+# Bypass a single push with:  git push --no-verify
+set -e
+echo "pre-push: npm run check"
+npm run check

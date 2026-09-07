@@ -24,10 +24,10 @@ import {
   type YakStatus,
 } from "./constants.js";
 import {
-  JournalEventSchema,
-  StepFailureSchema,
   type JournalEvent,
+  JournalEventSchema,
   type StepFailure,
+  StepFailureSchema,
 } from "./yak-schemas.js";
 
 // ── Observation shape ──────────────────────────────────────────────────
@@ -365,8 +365,7 @@ export function classifyRun(input: ClassifyInput): ClassifyResult {
 
   const stalled =
     input.mtimeMs !== null &&
-    input.now.getTime() - input.mtimeMs >
-      input.stalledAfterMinutes * 60_000;
+    input.now.getTime() - input.mtimeMs > input.stalledAfterMinutes * 60_000;
 
   return {
     runClass: stalled ? "stalled" : "alive",
@@ -431,7 +430,12 @@ export function linkMarkers(scans: MarkerScan[]): LinkageResult {
     if (current && !scan.held) issueToRun[scan.number] = current;
   }
 
-  return { runToIssue, issueToRun, runIdToBranch, faults: [...faults.values()] };
+  return {
+    runToIssue,
+    issueToRun,
+    runIdToBranch,
+    faults: [...faults.values()],
+  };
 }
 
 /** Runs / pending entries with no marker on any scanned issue (spec §5.5). */
@@ -518,7 +522,9 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
       status: s.reading.status,
       fault:
         s.reading.fault ??
-        (s.commentsUnreadable ? "issue comments could not be read this tick" : null) ??
+        (s.commentsUnreadable
+          ? "issue comments could not be read this tick"
+          : null) ??
         (shared
           ? `run ${shared.runId} is claimed by issues ${shared.issues.join(", ")}`
           : null),
@@ -581,4 +587,4 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
   };
 }
 
-export { realObserveDeps, ObserveError } from "./observe-deps.js";
+export { ObserveError, realObserveDeps } from "./observe-deps.js";

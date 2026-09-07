@@ -4,10 +4,10 @@
 // §10.5) arrive with ticket #7; for now the tick writes a plain summary
 // to stdout and non-fatal errors to stderr.
 
+import { type ApplyDeps, type ApplyResult, apply } from "./apply.js";
 import type { Config } from "./config.js";
-import { apply, type ApplyDeps, type ApplyResult } from "./apply.js";
-import { observe, type ObserveDeps } from "./observe.js";
-import { plan, type Action } from "./plan.js";
+import { type ObserveDeps, observe } from "./observe.js";
+import { type Action, plan } from "./plan.js";
 
 export interface TickIo {
   out(text: string): void;
@@ -71,14 +71,13 @@ export function runTick(
 function tallyRuns(classes: string[]): string {
   const counts = new Map<string, number>();
   for (const c of classes) counts.set(c, (counts.get(c) ?? 0) + 1);
-  return (
-    [...counts.entries()].map(([c, n]) => `${c}:${n}`).join(" ") || "none"
-  );
+  return [...counts.entries()].map(([c, n]) => `${c}:${n}`).join(" ") || "none";
 }
 
 function reportApply(result: ApplyResult, io: TickIo): void {
   for (const line of result.applied) io.out(`  ${line}`);
   for (const line of result.skipped) io.out(`  skipped: ${line}`);
   for (const line of result.errors) io.err(`  error: ${line}`);
-  if (result.aborted) io.err("  tick aborted — state left for a human (spec §5.1)");
+  if (result.aborted)
+    io.err("  tick aborted — state left for a human (spec §5.1)");
 }
