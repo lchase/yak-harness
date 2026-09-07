@@ -51,6 +51,32 @@ const run = (
   ...o,
 });
 
+const gateStep = (stepId: string) => ({
+  stepId,
+  kind: "gate",
+  renderedFirstLine: "…",
+  gate: {
+    rendered: "Proceed with this scope, narrow it, or abort?",
+    answerSchema: {
+      type: "object",
+      properties: {
+        decision: { type: "string", enum: ["proceed", "narrow", "abort"] },
+      },
+      required: ["decision"],
+    } as Record<string, unknown>,
+    schemaSha: "abc123",
+    fields: [
+      {
+        name: "decision",
+        kind: "enum" as const,
+        required: true,
+        members: ["proceed", "narrow", "abort"],
+      },
+    ],
+    bridgeError: null,
+  },
+});
+
 const obs = (o: Partial<Observation>): Observation => ({
   issues: [],
   runs: [],
@@ -59,6 +85,8 @@ const obs = (o: Partial<Observation>): Observation => ({
   launchBreadcrumbs: [],
   gatesPosted: [],
   gateReplies: [],
+  gateReprompts: [],
+  gateFailures: [],
   runToIssue: {},
   issueToRun: {},
   orphans: [],
@@ -289,7 +317,7 @@ describe("plan — precedence", () => {
         pending: [
           {
             runId: "r2",
-            steps: [{ stepId: "s2", kind: "gate", renderedFirstLine: "…" }],
+            steps: [gateStep("s2")],
           },
         ],
         gateReplies: [
@@ -321,7 +349,7 @@ describe("plan — precedence", () => {
         pending: [
           {
             runId: "r2",
-            steps: [{ stepId: "s2", kind: "gate", renderedFirstLine: "…" }],
+            steps: [gateStep("s2")],
           },
         ],
         gatesPosted: ["r2\ts2"],
@@ -545,6 +573,156 @@ describe("plan — §9.1 retry", () => {
     );
     expect(kinds(actions)).toEqual(["relabel"]);
     expect(actions[0]).toMatchObject({ to: "failed" });
+  });
+});
+
+// ── gate bridge (spec §7) ──────────────────────────────────────────
+
+describe("plan — gate bridge", () => {
+  const suspended = (id: string) => run({ id, class: "suspended" });
+
+  test("A: suspended run with an unposted flat gate → post-gate-comment with a generated body", () => {
+    const [action] = plan(
+      obs({
+        issues: [linked(2, "r2", "waiting")],
+        runs: [suspended("r2")],
+        pending: [{ runId: "r2", steps: [gateStep("s2")] }],
+      }),
+    );
+    expect(action).toMatchObject({
+      kind: "post-gate-comment",
+      issue: 2,
+      runId: "r2",
+      stepId: "s2",
+      guard: { noGateCommentFor: "r2\ts2" },
+    });
+    const body = (action as { body: string }).body;
+    expect(body).toContain("decision: proceed | narrow | abort");
+    expect(body).toContain(
+      "<!-- yak-gate run=r2 step=s2 schema-sha=abc123 -->",
+    );
+    expect(body).toContain("Proceed with this scope");
+  });
+
+  test("A: no post once the gate is in gatesPosted", () => {
+    expect(
+      kinds(
+        plan(
+          obs({
+            issues: [linked(2, "r2", "waiting")],
+            runs: [suspended("r2")],
+            pending: [{ runId: "r2", steps: [gateStep("s2")] }],
+            gatesPosted: ["r2\ts2"],
+          }),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("A′: a gateReprompt → one post-gate-reprompt action naming the fault", () => {
+    const [action] = plan(
+      obs({
+        issues: [linked(2, "r2", "waiting")],
+        runs: [suspended("r2")],
+        gateReprompts: [
+          {
+            issue: 2,
+            runId: "r2",
+            stepId: "s2",
+            attempt: 1,
+            faults: ["`decision` must be one of: proceed | narrow | abort"],
+            fields: gateStep("s2").gate.fields,
+          },
+        ],
+      }),
+    );
+    expect(action).toMatchObject({
+      kind: "post-gate-reprompt",
+      issue: 2,
+      attempt: 1,
+    });
+    expect((action as { body: string }).body).toContain(
+      "<!-- yak-gate-reprompt run=r2 step=s2 attempt=1 -->",
+    );
+  });
+
+  test("gateFailure → relabel to failed with the hand-write escalation", () => {
+    const [action] = plan(
+      obs({
+        issues: [linked(2, "r2", "waiting")],
+        runs: [suspended("r2")],
+        gateFailures: [
+          {
+            issue: 2,
+            runId: "r2",
+            stepId: "s2",
+            broke: "answerSchema is nested",
+          },
+        ],
+      }),
+    );
+    expect(action).toMatchObject({
+      kind: "relabel",
+      issue: 2,
+      from: "waiting",
+      to: "failed",
+      escalate: true,
+      gateFail: { stepId: "s2", broke: "answerSchema is nested" },
+    });
+  });
+
+  test("two gateFailures on one issue → one relabel carrying both reasons", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(2, "r2", "waiting")],
+        runs: [suspended("r2")],
+        gateFailures: [
+          { issue: 2, runId: "r2", stepId: "a", broke: "nested" },
+          { issue: 2, runId: "r2", stepId: "b", broke: "unreadable" },
+        ],
+      }),
+    );
+    expect(actions).toHaveLength(1);
+    expect((actions[0] as { gateFail: { broke: string } }).gateFail.broke).toBe(
+      "nested; unreadable",
+    );
+  });
+
+  test("gateFailure is idempotent once the yak-failed marker is up", () => {
+    expect(
+      kinds(
+        plan(
+          obs({
+            issues: [linked(2, "r2", "waiting")],
+            runs: [suspended("r2")],
+            gateFailures: [{ issue: 2, runId: "r2", stepId: "s2", broke: "x" }],
+            escalated: ["r2"],
+          }),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("B: a gateReply → write-answer-and-resume", () => {
+    const [action] = plan(
+      obs({
+        issues: [linked(2, "r2", "waiting")],
+        runs: [suspended("r2")],
+        gateReplies: [
+          {
+            issue: 2,
+            runId: "r2",
+            stepId: "s2",
+            answer: { decision: "narrow" },
+          },
+        ],
+      }),
+    );
+    expect(action).toMatchObject({
+      kind: "write-answer-and-resume",
+      answer: { decision: "narrow" },
+      guard: { runSuspended: true, noAnsweredMarkerFor: "r2\ts2" },
+    });
   });
 });
 

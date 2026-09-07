@@ -108,6 +108,18 @@ function fixtureDeps(
       }
       return { journal, mtimeMs: opts.mtimeOverrides?.[id] ?? freshMtime };
     },
+    readGateRequest: (runId, stepId) => {
+      try {
+        return JSON.parse(
+          readFileSync(
+            join(RUNS_DIR, runId, "pending", `${stepId}.request.json`),
+            "utf8",
+          ),
+        );
+      } catch {
+        return null;
+      }
+    },
     prForRun: (id) => prs[id] ?? null,
   };
 }
@@ -485,6 +497,8 @@ describe("observe", () => {
         "launchBreadcrumbs",
         "gatesPosted",
         "gateReplies",
+        "gateReprompts",
+        "gateFailures",
         "escalated",
       ].sort(),
     );
@@ -673,15 +687,59 @@ describe("observe", () => {
     });
   });
 
-  test("pending exposes step kind + first rendered line only", () => {
-    expect(
-      obs.pending.find((p) => p.runId === "run-suspended")?.steps[0],
-    ).toEqual({
+  test("pending exposes step kind, first rendered line, and the gate request", () => {
+    const step = obs.pending.find((p) => p.runId === "run-suspended")?.steps[0];
+    expect(step).toMatchObject({
       stepId: "confirm-scope",
       kind: "gate",
       renderedFirstLine:
         "Triage thinks this is a bug in the retry backoff (confidence 0.71).",
     });
+    expect(step?.gate).toMatchObject({
+      rendered: expect.stringContaining("retry backoff"),
+      bridgeError: null,
+    });
+    expect(step?.gate?.schemaSha).toMatch(/^[0-9a-f]{6}$/);
+    expect(step?.gate?.fields?.map((f) => f.name)).toEqual([
+      "decision",
+      "notes",
+    ]);
+  });
+
+  test("gate bridge: a posted gate on #12 with a valid owner reply → a gateReply", () => {
+    const base = fixtureDeps();
+    const gated = observe(CONFIG, {
+      ...base,
+      listComments: (n) =>
+        n === 12
+          ? [
+              {
+                body: "<!-- yak-harness run=run-suspended branch=yak/run-suspended launched=2026-09-06T09:12:45Z -->",
+                authorAssociation: "NONE",
+                createdAt: "2026-09-06T09:12:45Z",
+              },
+              {
+                body: "prompt\n<!-- yak-gate run=run-suspended step=confirm-scope schema-sha=deadbe -->",
+                authorAssociation: "NONE",
+                createdAt: "2026-09-06T09:15:00Z",
+              },
+              {
+                body: "decision: narrow\nnotes: cap only",
+                authorAssociation: "OWNER",
+                createdAt: "2026-09-06T09:20:00Z",
+              },
+            ]
+          : (base.listComments(n) ?? []),
+    });
+    expect(gated.gatesPosted).toContain("run-suspended\tconfirm-scope");
+    expect(gated.gateReplies).toEqual([
+      {
+        issue: 12,
+        runId: "run-suspended",
+        stepId: "confirm-scope",
+        answer: { decision: "narrow", notes: "cap only" },
+      },
+    ]);
   });
 
   test("an issue whose comments cannot be read is faulted, not fatal", () => {

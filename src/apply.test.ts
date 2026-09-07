@@ -63,6 +63,9 @@ function fake(opts: FakeOpts = {}) {
     writeBreadcrumb: (name, data) =>
       calls.push(`write ${name} ${JSON.stringify(data)}`),
     removeBreadcrumb: (name) => calls.push(`remove ${name}`),
+    writeAnswer: (runId, stepId, answer) =>
+      calls.push(`answer ${runId}/${stepId} :: ${JSON.stringify(answer)}`),
+    resumeRun: (runId) => calls.push(`resume ${runId}`),
     postComment: (issue, body) => {
       calls.push(`comment #${issue} :: ${body.split("\n").pop()}`);
       bodies.push(body);
@@ -454,6 +457,105 @@ describe("apply — flag-orphan (E)", () => {
     );
     expect(calls).toEqual([]);
     expect(result.errors[0]).toMatch(/unsafe run id/);
+  });
+});
+
+// ── A / A′ / B — gate bridge (spec §7) ─────────────────────────────
+
+describe("apply — gate bridge", () => {
+  test("A: post-gate-comment posts the body verbatim", () => {
+    const { deps, calls, bodies } = fake();
+    const result = apply(
+      [
+        {
+          kind: "post-gate-comment",
+          issue: 12,
+          runId: "r1",
+          stepId: "confirm-scope",
+          body: "🐂 gate body\n<!-- yak-gate run=r1 step=confirm-scope schema-sha=abc -->",
+          guard: { noGateCommentFor: "r1\tconfirm-scope" },
+        },
+      ],
+      CONFIG,
+      deps,
+    );
+    expect(result.errors).toEqual([]);
+    expect(bodies[0]).toContain("<!-- yak-gate run=r1 step=confirm-scope");
+    expect(calls[0]).toMatch(/^comment #12/);
+  });
+
+  test("A′: post-gate-reprompt posts the re-prompt body", () => {
+    const { deps, bodies } = fake();
+    apply(
+      [
+        {
+          kind: "post-gate-reprompt",
+          issue: 12,
+          runId: "r1",
+          stepId: "s1",
+          attempt: 1,
+          body: "⚠️ nope\n<!-- yak-gate-reprompt run=r1 step=s1 attempt=1 -->",
+        },
+      ],
+      CONFIG,
+      deps,
+    );
+    expect(bodies[0]).toContain("yak-gate-reprompt");
+  });
+
+  test("B: write-answer-and-resume does writeAnswer → resume → answered marker, in order", () => {
+    const { deps, calls } = fake();
+    const result = apply(
+      [
+        {
+          kind: "write-answer-and-resume",
+          issue: 12,
+          runId: "r1",
+          stepId: "confirm-scope",
+          answer: { decision: "proceed" },
+          guard: {
+            runSuspended: true,
+            noAnsweredMarkerFor: "r1\tconfirm-scope",
+          },
+        },
+      ],
+      CONFIG,
+      deps,
+    );
+    expect(result.errors).toEqual([]);
+    expect(calls).toEqual([
+      'answer r1/confirm-scope :: {"decision":"proceed"}',
+      "resume r1",
+      "comment #12 :: <!-- yak-answered run=r1 step=confirm-scope -->",
+    ]);
+  });
+
+  test("gate-failure relabel posts the hand-write escalation, then moves the label", () => {
+    const { deps, calls, bodies } = fake();
+    const result = apply(
+      [
+        {
+          kind: "relabel",
+          issue: 12,
+          from: "waiting",
+          to: "failed",
+          runId: "r1",
+          escalate: true,
+          gateFail: { stepId: "s1", broke: "answerSchema is nested" },
+          guard: { currentStatus: "waiting" },
+        },
+      ],
+      CONFIG,
+      deps,
+    );
+    expect(result.errors).toEqual([]);
+    expect(bodies[0]).toContain("hand-write `pending/s1.answer.json`");
+    expect(bodies[0]).toContain("<!-- yak-failed run=r1 -->");
+    expect(calls).toEqual([
+      "comment #12 :: <!-- yak-failed run=r1 -->",
+      "-label #12 yak:waiting",
+      "+label #12 yak:failed",
+    ]);
   });
 });
 

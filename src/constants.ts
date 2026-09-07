@@ -106,11 +106,24 @@ export const gateRepromptMarker = (args: {
 }): string =>
   `<!-- yak-gate-reprompt run=${args.run} step=${args.step} attempt=${args.attempt} -->`;
 
-/** Written once a valid reply is parsed, before `yak resume` (spec §7.5). */
+/** Written once a valid reply is parsed, alongside `yak resume` (spec §7.5). */
 export const gateAnsweredMarker = (args: {
   run: string;
   step: string;
 }): string => `<!-- yak-answered run=${args.run} step=${args.step} -->`;
+
+/**
+ * Matchers for the three gate markers above — kept here so the read side
+ * and the write side share one definition of each format (CLAUDE.md
+ * "Locked constants … all marker-comment formats"). Each capture group
+ * order mirrors its builder's argument order.
+ */
+export const GATE_MARKER_RE =
+  /<!--\s*yak-gate\s+run=(\S+)\s+step=(\S+)\s+schema-sha=(\S+)\s*-->/;
+export const GATE_REPROMPT_MARKER_RE =
+  /<!--\s*yak-gate-reprompt\s+run=(\S+)\s+step=(\S+)\s+attempt=(\d+)\s*-->/;
+export const GATE_ANSWERED_MARKER_RE =
+  /<!--\s*yak-answered\s+run=(\S+)\s+step=(\S+)\s*-->/;
 
 /**
  * Launch poll (spec §5.1 step 3): after the detached spawn, `apply` polls
@@ -124,6 +137,28 @@ export const LAUNCH_POLL_TIMEOUT_MS = 15_000; // config candidate if a real need
 /** Guards the single escalation comment on entry to `yak:failed` (spec §9.4). */
 export const failedMarker = (args: { run: string }): string =>
   `<!-- yak-failed run=${args.run} -->`;
+
+/**
+ * The escalation comment for a gate the harness cannot bridge (spec §7.1,
+ * §7.3): a nested `answerSchema`, an unreadable request file, or a second
+ * malformed reply. Unlike {@link failedComment} the fix is never a
+ * relaunch — the run's work is intact and waiting on a hand-written
+ * answer file. Carries the same {@link failedMarker} for idempotency.
+ */
+export const gateFailedComment = (args: {
+  run: string;
+  stepId: string;
+  broke: string;
+}): string =>
+  [
+    `🛑 **yak run \`${args.run}\` needs a human — moved to \`${YAK_STATUS_PREFIX}failed\`.**`,
+    "",
+    `**What broke:** ${args.broke}`,
+    "**What was tried:** the gate bridge could not turn a reply into a schema-valid answer; the run is suspended with its work intact.",
+    `**What to do:** hand-write \`pending/${args.stepId}.answer.json\` in the run's worktree, run \`yak resume ${args.run}\`, then drop \`${YAK_STATUS_PREFIX}failed\`.`,
+    "",
+    failedMarker({ run: args.run }),
+  ].join("\n");
 
 /** What the §9.3 stalled kill did with the recorded pid. */
 export type StalledKillOutcome =

@@ -452,6 +452,24 @@ export function realObserveDeps(config: Config): ObserveDeps {
       return { journal, mtimeMs };
     },
 
+    readGateRequest: (runId, stepId) => {
+      if (!runIdIsSafe(runId) || !runIdIsSafe(stepId)) return null;
+      let text: string;
+      try {
+        text = readFileSync(
+          join(config.runsDir, runId, "pending", `${stepId}.request.json`),
+          "utf8",
+        );
+      } catch {
+        return null;
+      }
+      try {
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
+    },
+
     prForRun: (runId, branch) => {
       const url = runIdIsSafe(runId)
         ? readPrUrlArtifact(config.runsDir, runId)

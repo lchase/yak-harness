@@ -35,6 +35,8 @@ export function describeAction(a: Action): string {
       return `relabel      #${a.issue} ${a.from} → yak:${a.to}${a.escalate ? " (escalate)" : ""}${a.stall ? ` (kill pid ${a.stall.pid ?? "none"})` : ""}`;
     case "post-gate-comment":
       return `post-gate    #${a.issue} run=${a.runId} step=${a.stepId}`;
+    case "post-gate-reprompt":
+      return `gate-reprompt #${a.issue} run=${a.runId} step=${a.stepId} attempt=${a.attempt}`;
     case "write-answer-and-resume":
       return `resume       #${a.issue} run=${a.runId} step=${a.stepId}`;
     case "flag-orphan":

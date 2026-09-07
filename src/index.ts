@@ -29,10 +29,24 @@ export {
   runDoctor,
 } from "./doctor.js";
 export {
+  contractLines,
+  type GateFailure,
+  type GateField,
+  type GateReply,
+  type GateReprompt,
+  gateCommentBody,
+  parseReply,
+  readFields,
+  repromptCommentBody,
+  resolveGates,
+  schemaSha,
+  validateAnswer,
+} from "./gate-bridge.js";
+export {
   classifyRun,
   findOrphans,
   findStaleMarkers,
-  type GateReply,
+  type GateRequest,
   type IssueObservation,
   type LinkageFault,
   linkMarkers,
@@ -79,6 +93,7 @@ export {
   type FlagOrphanAction,
   type LaunchRunAction,
   type PostGateCommentAction,
+  type PostGateRepromptAction,
   plan,
   type RelabelAction,
   type WriteAnswerAndResumeAction,
