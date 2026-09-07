@@ -17,7 +17,9 @@ test("GatePendingRequest accepts a well-formed request", () => {
     context: { artifacts: ["plan"] },
     openedAt: "2026-08-08T14:09:02Z",
   };
-  expect(GatePendingRequestSchema.parse(req)).toMatchObject({ stepId: "approve-plan" });
+  expect(GatePendingRequestSchema.parse(req)).toMatchObject({
+    stepId: "approve-plan",
+  });
 });
 
 test("GatePendingRequest rejects a non-ISO openedAt and a missing rendered", () => {
@@ -54,7 +56,11 @@ test("StepFailure round-trips reason/detail/recoverable", () => {
 
 test("StepFailure accepts an unknown-but-well-formed reason (spec §9.1 — yak owns the taxonomy)", () => {
   expect(
-    StepFailureSchema.parse({ reason: "quota-exceeded", detail: "x", recoverable: true }),
+    StepFailureSchema.parse({
+      reason: "quota-exceeded",
+      detail: "x",
+      recoverable: true,
+    }),
   ).toMatchObject({ reason: "quota-exceeded", recoverable: true });
 });
 

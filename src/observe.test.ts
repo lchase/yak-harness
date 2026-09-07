@@ -8,20 +8,23 @@ import {
   findOrphans,
   findStaleMarkers,
   linkMarkers,
+  type MarkerScan,
+  type Observation,
+  type ObserveDeps,
   observe,
   parseJournal,
   parseMarkers,
   prStateFrom,
-  readLabels,
-  type MarkerScan,
-  type Observation,
-  type ObserveDeps,
   type RawComment,
   type RawPr,
   type RunObservation,
+  readLabels,
 } from "./observe.js";
 
-const FIX = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__/observe");
+const FIX = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "__fixtures__/observe",
+);
 const RUNS_DIR = join(FIX, "runs");
 const NOW = new Date("2026-09-06T12:00:00Z");
 
@@ -56,13 +59,18 @@ function fixtureDeps(
 ): ObserveDeps {
   const now = opts.now ?? NOW;
   const freshMtime = now.getTime() - 60_000;
-  const issues = readJson<
-    { number: number; title: string; labels: { name: string }[] }[]
-  >("gh/issues.json");
+  const issues =
+    readJson<{ number: number; title: string; labels: { name: string }[] }[]>(
+      "gh/issues.json",
+    );
   const comments = readJson<Record<string, RawComment[]>>("gh/comments.json");
-  const pending = readJson<
-    { runId: string; steps: { stepId: string; kind: string; rendered: string }[] }[]
-  >("yak-pending.json");
+  const pending =
+    readJson<
+      {
+        runId: string;
+        steps: { stepId: string; kind: string; rendered: string }[];
+      }[]
+    >("yak-pending.json");
   const prs = readJson<Record<string, RawPr>>("gh/prs.json");
 
   return {
@@ -102,14 +110,22 @@ describe("parseMarkers", () => {
         "retry log\n<!-- yak-harness run=r1 branch=yak/r1 launched=2026-01-01T00:00:00Z -->\n<!-- yak-harness run=r2 branch=custom launched=2026-01-02T00:00:00Z -->",
       ),
       comment("chatter", "OWNER"),
-      comment("<!-- yak-harness run=r3 branch=yak/r3 launched=2026-01-03T00:00:00Z -->"),
+      comment(
+        "<!-- yak-harness run=r3 branch=yak/r3 launched=2026-01-03T00:00:00Z -->",
+      ),
     ]);
     expect(markers.map((m) => m.runId)).toEqual(["r1", "r2", "r3"]);
-    expect(markers[1]).toEqual({ runId: "r2", branch: "custom", launched: "2026-01-02T00:00:00Z" });
+    expect(markers[1]).toEqual({
+      runId: "r2",
+      branch: "custom",
+      launched: "2026-01-02T00:00:00Z",
+    });
   });
 
   test("a malformed marker (missing a field) is silently ignored", () => {
-    expect(parseMarkers([comment("<!-- yak-harness run=r1 branch=yak/r1 -->")])).toEqual([]);
+    expect(
+      parseMarkers([comment("<!-- yak-harness run=r1 branch=yak/r1 -->")]),
+    ).toEqual([]);
   });
 });
 
@@ -180,31 +196,49 @@ describe("classifyRun", () => {
     `{"t":"run.finished","at":"2026-09-06T10:00:00Z","runId":"r","status":"${status}"}`;
 
   test("last event not run.finished, journal fresh → alive", () => {
-    const r = classifyRun({ ...base, journal: started("r"), mtimeMs: NOW.getTime() - 5 * 60_000 });
+    const r = classifyRun({
+      ...base,
+      journal: started("r"),
+      mtimeMs: NOW.getTime() - 5 * 60_000,
+    });
     expect(r.runClass).toBe("alive");
     expect(r.lastEventAt).toBe("2026-09-06T09:12:44Z");
   });
 
   test("alive + journal mtime older than threshold → stalled", () => {
     expect(
-      classifyRun({ ...base, journal: started("r"), mtimeMs: NOW.getTime() - 46 * 60_000 }).runClass,
+      classifyRun({
+        ...base,
+        journal: started("r"),
+        mtimeMs: NOW.getTime() - 46 * 60_000,
+      }).runClass,
     ).toBe("stalled");
   });
 
   test("stalled boundary is strict — exactly the threshold is still alive", () => {
     expect(
-      classifyRun({ ...base, journal: started("r"), mtimeMs: NOW.getTime() - 45 * 60_000 }).runClass,
+      classifyRun({
+        ...base,
+        journal: started("r"),
+        mtimeMs: NOW.getTime() - 45 * 60_000,
+      }).runClass,
     ).toBe("alive");
   });
 
   test("no journal + a stale dir mtime → stalled (never 'alive' forever)", () => {
     expect(
-      classifyRun({ ...base, journal: null, mtimeMs: NOW.getTime() - 90 * 60_000 }).runClass,
+      classifyRun({
+        ...base,
+        journal: null,
+        mtimeMs: NOW.getTime() - 90 * 60_000,
+      }).runClass,
     ).toBe("stalled");
   });
 
   test("no journal + no mtime → alive (nothing to age against)", () => {
-    expect(classifyRun({ ...base, journal: null, mtimeMs: null }).runClass).toBe("alive");
+    expect(
+      classifyRun({ ...base, journal: null, mtimeMs: null }).runClass,
+    ).toBe("alive");
   });
 
   test("run.finished suspended / ok / failed", () => {
@@ -225,7 +259,11 @@ describe("classifyRun", () => {
 
   test("run.finished with a status yak added later → failed (terminal, needs a human)", () => {
     expect(
-      classifyRun({ ...base, journal: `${started("r")}\n${finished("cancelled")}`, mtimeMs: NOW.getTime() }).runClass,
+      classifyRun({
+        ...base,
+        journal: `${started("r")}\n${finished("cancelled")}`,
+        mtimeMs: NOW.getTime(),
+      }).runClass,
     ).toBe("failed");
   });
 
@@ -246,7 +284,11 @@ describe("classifyRun", () => {
   });
 
   test("failed run with no parseable failure → terminalFailure null", () => {
-    const r = classifyRun({ ...base, journal: `${started("r")}\n${finished("failed")}`, mtimeMs: NOW.getTime() });
+    const r = classifyRun({
+      ...base,
+      journal: `${started("r")}\n${finished("failed")}`,
+      mtimeMs: NOW.getTime(),
+    });
     expect(r.terminalFailure).toBeNull();
   });
 });
@@ -257,31 +299,45 @@ describe("prStateFrom", () => {
   test("maps every gh PR shape", () => {
     expect(prStateFrom(null)).toBe("missing");
     expect(prStateFrom({ state: "OPEN", mergedAt: null })).toBe("open");
-    expect(prStateFrom({ state: "MERGED", mergedAt: "2026-09-07T00:00:00Z" })).toBe("merged");
-    expect(prStateFrom({ state: "CLOSED", mergedAt: "2026-09-07T00:00:00Z" })).toBe("merged");
-    expect(prStateFrom({ state: "CLOSED", mergedAt: null })).toBe("closed-unmerged");
+    expect(
+      prStateFrom({ state: "MERGED", mergedAt: "2026-09-07T00:00:00Z" }),
+    ).toBe("merged");
+    expect(
+      prStateFrom({ state: "CLOSED", mergedAt: "2026-09-07T00:00:00Z" }),
+    ).toBe("merged");
+    expect(prStateFrom({ state: "CLOSED", mergedAt: null })).toBe(
+      "closed-unmerged",
+    );
   });
 });
 
 // ── linkMarkers ─────────────────────────────────────────────────────
 
 describe("linkMarkers", () => {
-  const scan = (number: number, runIds: string[], held = false): MarkerScan => ({
+  const scan = (
+    number: number,
+    runIds: string[],
+    held = false,
+  ): MarkerScan => ({
     number,
     held,
-    markers: runIds.map((runId) => ({ runId, branch: `yak/${runId}`, launched: "" })),
+    markers: runIds.map((runId) => ({
+      runId,
+      branch: `yak/${runId}`,
+      launched: "",
+    })),
   });
 
   test("first-seen wins for runToIssue; issueToRun is last-marker", () => {
     const r = linkMarkers([scan(10, ["a", "b"]), scan(11, ["c"])]);
     expect(r.runToIssue).toEqual({ a: 10, b: 10, c: 11 });
     expect(r.issueToRun).toEqual({ 10: "b", 11: "c" });
-    expect(r.runIdToBranch["b"]).toBe("yak/b");
+    expect(r.runIdToBranch.b).toBe("yak/b");
   });
 
   test("a run id on two issues → a linkage fault, first owner kept", () => {
     const r = linkMarkers([scan(10, ["x"]), scan(11, ["x"])]);
-    expect(r.runToIssue["x"]).toBe(10);
+    expect(r.runToIssue.x).toBe(10);
     expect(r.faults).toEqual([{ runId: "x", issues: [10, 11] }]);
   });
 
@@ -306,7 +362,13 @@ describe("findOrphans", () => {
 
   test("unmarked run dirs become orphans; live iff not ok/failed", () => {
     const orphans = findOrphans(
-      [run("a", "alive"), run("s", "stalled"), run("k", "ok"), run("f", "failed"), run("m", "alive")],
+      [
+        run("a", "alive"),
+        run("s", "stalled"),
+        run("k", "ok"),
+        run("f", "failed"),
+        run("m", "alive"),
+      ],
       [],
       new Set(["m"]),
       new Set(["a", "s", "k", "f", "m"]),
@@ -320,12 +382,24 @@ describe("findOrphans", () => {
   });
 
   test("a pending entry with no marker and no run dir → pending-only orphan", () => {
-    const orphans = findOrphans([], [{ runId: "ghost", steps: [] }], new Set(), new Set());
-    expect(orphans).toEqual([{ runId: "ghost", class: "pending-only", live: true }]);
+    const orphans = findOrphans(
+      [],
+      [{ runId: "ghost", steps: [] }],
+      new Set(),
+      new Set(),
+    );
+    expect(orphans).toEqual([
+      { runId: "ghost", class: "pending-only", live: true },
+    ]);
   });
 
   test("a pending entry that has a run dir is not double-counted", () => {
-    const orphans = findOrphans([run("g", "suspended")], [{ runId: "g", steps: [] }], new Set(), new Set(["g"]));
+    const orphans = findOrphans(
+      [run("g", "suspended")],
+      [{ runId: "g", steps: [] }],
+      new Set(),
+      new Set(["g"]),
+    );
     expect(orphans.map((o) => o.runId)).toEqual(["g"]);
   });
 });
@@ -412,9 +486,14 @@ describe("observe", () => {
   });
 
   test("a run id claimed by two issues is a linkage fault on both", () => {
-    expect(obs.linkageFaults).toContainEqual({ runId: "run-shared", issues: [20, 21] });
+    expect(obs.linkageFaults).toContainEqual({
+      runId: "run-shared",
+      issues: [20, 21],
+    });
     for (const n of [20, 21]) {
-      expect(obs.issues.find((i) => i.number === n)?.fault).toMatch(/claimed by issues 20, 21/);
+      expect(obs.issues.find((i) => i.number === n)?.fault).toMatch(
+        /claimed by issues 20, 21/,
+      );
     }
   });
 
@@ -429,11 +508,17 @@ describe("observe", () => {
   });
 
   test("stalled is derived purely from journal mtime vs stalledAfterMinutes", () => {
-    expect(observe(CONFIG, fixtureDeps()).runs.find((r) => r.id === "run-stalled")?.class).toBe("alive");
     expect(
-      observe(CONFIG, fixtureDeps({ mtimeOverrides: { "run-stalled": NOW.getTime() - 46 * 60_000 } })).runs.find(
-        (r) => r.id === "run-stalled",
-      )?.class,
+      observe(CONFIG, fixtureDeps()).runs.find((r) => r.id === "run-stalled")
+        ?.class,
+    ).toBe("alive");
+    expect(
+      observe(
+        CONFIG,
+        fixtureDeps({
+          mtimeOverrides: { "run-stalled": NOW.getTime() - 46 * 60_000 },
+        }),
+      ).runs.find((r) => r.id === "run-stalled")?.class,
     ).toBe("stalled");
   });
 
@@ -448,20 +533,35 @@ describe("observe", () => {
 
   test("orphans: unmarked run dir + pending-only entry", () => {
     const byId = Object.fromEntries(obs.orphans.map((o) => [o.runId, o]));
-    expect(byId["run-orphan"]).toEqual({ runId: "run-orphan", class: "alive", live: true });
-    expect(byId["run-ghost"]).toEqual({ runId: "run-ghost", class: "pending-only", live: true });
+    expect(byId["run-orphan"]).toEqual({
+      runId: "run-orphan",
+      class: "alive",
+      live: true,
+    });
+    expect(byId["run-ghost"]).toEqual({
+      runId: "run-ghost",
+      class: "pending-only",
+      live: true,
+    });
     expect(byId["run-alive"]).toBeUndefined();
   });
 
   test("stale: issue #14's marker points at a run with no .runs/ dir", () => {
-    expect(obs.stale).toContainEqual({ issueNumber: 14, runId: "run-missing", status: "running" });
+    expect(obs.stale).toContainEqual({
+      issueNumber: 14,
+      runId: "run-missing",
+      status: "running",
+    });
   });
 
   test("pending exposes step kind + first rendered line only", () => {
-    expect(obs.pending.find((p) => p.runId === "run-suspended")?.steps[0]).toEqual({
+    expect(
+      obs.pending.find((p) => p.runId === "run-suspended")?.steps[0],
+    ).toEqual({
       stepId: "confirm-scope",
       kind: "gate",
-      renderedFirstLine: "Triage thinks this is a bug in the retry backoff (confidence 0.71).",
+      renderedFirstLine:
+        "Triage thinks this is a bug in the retry backoff (confidence 0.71).",
     });
   });
 
@@ -470,7 +570,9 @@ describe("observe", () => {
       ...fixtureDeps(),
       listComments: (n) => (n === 11 ? null : []),
     });
-    expect(withUnreadable.issues.find((i) => i.number === 11)?.fault).toMatch(/could not be read/);
+    expect(withUnreadable.issues.find((i) => i.number === 11)?.fault).toMatch(
+      /could not be read/,
+    );
   });
 
   test("a quiet backlog produces empty sections", () => {
@@ -480,6 +582,12 @@ describe("observe", () => {
       yakPending: () => [],
       listRunDirs: () => [],
     });
-    expect(quiet).toMatchObject({ issues: [], runs: [], orphans: [], stale: [], linkageFaults: [] });
+    expect(quiet).toMatchObject({
+      issues: [],
+      runs: [],
+      orphans: [],
+      stale: [],
+      linkageFaults: [],
+    });
   });
 });

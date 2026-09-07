@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
   CURRENT_STATUS_VALUES,
-  OBSERVED_VALUES,
-  transition,
   type CurrentStatus,
+  OBSERVED_VALUES,
   type Observed,
   type Transition,
+  transition,
 } from "./transition.js";
 
 // The spec §8.2 table, transcribed cell-for-cell as the source of

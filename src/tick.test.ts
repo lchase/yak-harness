@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { Config } from "./config.js";
 import type { ApplyDeps } from "./apply.js";
+import type { Config } from "./config.js";
 import type { ObserveDeps } from "./observe.js";
 import { runTick } from "./tick.js";
 
@@ -32,7 +32,11 @@ function observeOneBacklogIssue(): ObserveDeps {
 function capture() {
   const out: string[] = [];
   const err: string[] = [];
-  return { io: { out: (t: string) => out.push(t), err: (t: string) => err.push(t) }, out, err };
+  return {
+    io: { out: (t: string) => out.push(t), err: (t: string) => err.push(t) },
+    out,
+    err,
+  };
 }
 
 const recordingApplyDeps = (): { deps: ApplyDeps; calls: string[] } => {
@@ -116,8 +120,15 @@ describe("runTick", () => {
   test("a quiet backlog → no actions, exit 0", () => {
     const c = capture();
     const apply = recordingApplyDeps();
-    const empty: ObserveDeps = { ...observeOneBacklogIssue(), listIssues: () => [] };
-    const code = runTick(CONFIG, { observe: empty, apply: apply.deps }, { io: c.io });
+    const empty: ObserveDeps = {
+      ...observeOneBacklogIssue(),
+      listIssues: () => [],
+    };
+    const code = runTick(
+      CONFIG,
+      { observe: empty, apply: apply.deps },
+      { io: c.io },
+    );
     expect(code).toBe(0);
     expect(c.out.join("\n")).toContain("0 action(s)");
     expect(apply.calls).toEqual([]);

@@ -73,11 +73,19 @@ function requireGitRepo(deps: DoctorDeps, path: string): string {
   // never pulls it, so a stale feature branch means every run branches
   // off the wrong base. Tolerated only when origin/HEAD is unset (can't
   // tell), which is itself worth surfacing.
-  const current = deps.run("git", ["-C", path, "branch", "--show-current"]).trim();
+  const current = deps
+    .run("git", ["-C", path, "branch", "--show-current"])
+    .trim();
   let defaultBranch: string;
   try {
     defaultBranch = deps
-      .run("git", ["-C", path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+      .run("git", [
+        "-C",
+        path,
+        "symbolic-ref",
+        "--short",
+        "refs/remotes/origin/HEAD",
+      ])
       .trim()
       .replace(/^origin\//, "");
   } catch {

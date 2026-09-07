@@ -79,9 +79,10 @@ const noop = (next: YakStatus): Transition => ({
 
 /** Every column of a terminal row maps to the same inert cell. */
 const trapRow = (status: YakStatus): Record<Observed, Transition> =>
-  Object.fromEntries(
-    OBSERVED_VALUES.map((o) => [o, noop(status)]),
-  ) as Record<Observed, Transition>;
+  Object.fromEntries(OBSERVED_VALUES.map((o) => [o, noop(status)])) as Record<
+    Observed,
+    Transition
+  >;
 
 // The table verbatim from spec §8.2. `terminal-bad` covers the table's
 // "failed / stalled / orphan / stale" column (the "+ flag" there is the

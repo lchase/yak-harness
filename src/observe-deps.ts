@@ -237,7 +237,9 @@ function readPrUrlArtifact(runsDir: string, runId: string): string | null {
     if (path.endsWith(".json")) {
       try {
         const v = JSON.parse(text) as unknown;
-        return typeof v === "string" ? v : ((v as { url?: string }).url ?? null);
+        return typeof v === "string"
+          ? v
+          : ((v as { url?: string }).url ?? null);
       } catch {
         return null;
       }
@@ -348,9 +350,9 @@ export function realObserveDeps(config: Config): ObserveDeps {
       const issues: number[] = [];
       for (const name of names) {
         try {
-          const parsed = JSON.parse(
-            readFileSync(join(dir, name), "utf8"),
-          ) as { issue?: unknown };
+          const parsed = JSON.parse(readFileSync(join(dir, name), "utf8")) as {
+            issue?: unknown;
+          };
           if (typeof parsed.issue === "number") issues.push(parsed.issue);
         } catch {
           // A half-written breadcrumb from a tick that died mid-write:
@@ -397,8 +399,7 @@ export function realObserveDeps(config: Config): ObserveDeps {
       // Transient `gh pr view` failure, or no usable artifact: fall back
       // to the deterministic worktree branch before concluding "no PR"
       // (spec §8.3).
-      const head =
-        branch && branchIsSafe(branch) ? branch : `yak/${runId}`;
+      const head = branch && branchIsSafe(branch) ? branch : `yak/${runId}`;
       return ghPrListHead(head);
     },
   };

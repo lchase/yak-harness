@@ -1,11 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { type ApplyDeps, apply, branchForRun, renderInput } from "./apply.js";
 import type { Config } from "./config.js";
-import {
-  apply,
-  branchForRun,
-  renderInput,
-  type ApplyDeps,
-} from "./apply.js";
 import type { Action } from "./plan.js";
 
 const CONFIG: Config = {
@@ -90,9 +85,9 @@ const launch = (issue: number): Action => ({
 
 describe("renderInput", () => {
   test("substitutes {{repo}} and {{number}} (with/without inner spaces)", () => {
-    expect(
-      renderInput("issueRef={{repo}}#{{ number }}", "o/r", 12),
-    ).toBe("issueRef=o/r#12");
+    expect(renderInput("issueRef={{repo}}#{{ number }}", "o/r", 12)).toBe(
+      "issueRef=o/r#12",
+    );
   });
 });
 
@@ -124,8 +119,10 @@ describe("apply — launch (D)", () => {
     expect(result.errors[0]).toMatch(/no new run dir/);
     expect(calls.some((c) => c.startsWith("comment"))).toBe(false);
     expect(calls.some((c) => c.startsWith("+label"))).toBe(false);
-    expect(calls).toContain("write launching-1.json " +
-      '{"issue":1,"launchedAt":"2026-09-06T09:00:00.000Z"}');
+    expect(calls).toContain(
+      "write launching-1.json " +
+        '{"issue":1,"launchedAt":"2026-09-06T09:00:00.000Z"}',
+    );
   });
 
   test("two new run dirs at once → abort (cannot disambiguate)", () => {
@@ -157,7 +154,9 @@ describe("apply — launch (D)", () => {
 
   test("journal run.started names a different workflow → abort", () => {
     const { deps } = fake({
-      journals: { "run-new": startedJournal("run-new", "2026-09-06T09:00:01Z", "other") },
+      journals: {
+        "run-new": startedJournal("run-new", "2026-09-06T09:00:01Z", "other"),
+      },
     });
     const result = apply([launch(1)], CONFIG, deps);
     expect(result.aborted).toBe(true);
@@ -166,7 +165,9 @@ describe("apply — launch (D)", () => {
 
   test("run.started timestamp far in the past → abort (diffed into a stale dir)", () => {
     const { deps } = fake({
-      journals: { "run-new": startedJournal("run-new", "2025-01-01T00:00:00Z") },
+      journals: {
+        "run-new": startedJournal("run-new", "2025-01-01T00:00:00Z"),
+      },
     });
     const result = apply([launch(1)], CONFIG, deps);
     expect(result.aborted).toBe(true);
@@ -217,7 +218,14 @@ describe("apply — relabel (C)", () => {
   test("from ∅ (marker recovery) → only adds a label", () => {
     const { deps, calls } = fake();
     apply(
-      [relabel({ issue: 7, from: "none", to: "running", guard: { currentStatus: "none" } })],
+      [
+        relabel({
+          issue: 7,
+          from: "none",
+          to: "running",
+          guard: { currentStatus: "none" },
+        }),
+      ],
       CONFIG,
       deps,
     );
@@ -241,7 +249,15 @@ describe("apply — relabel (C)", () => {
 test("unhandled action kinds are recorded as skipped, not dropped", () => {
   const { deps } = fake();
   const result = apply(
-    [{ kind: "flag-orphan", runId: "x", orphanClass: "alive", live: true, guard: { notAlreadyFlagged: true } }],
+    [
+      {
+        kind: "flag-orphan",
+        runId: "x",
+        orphanClass: "alive",
+        live: true,
+        guard: { notAlreadyFlagged: true },
+      },
+    ],
     CONFIG,
     deps,
   );
