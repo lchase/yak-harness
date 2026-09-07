@@ -70,7 +70,10 @@ export function realApplyDeps(config: Config): ApplyDeps {
 
     readJournal: (runId) => {
       try {
-        return readFileSync(join(config.runsDir, runId, "journal"), "utf8");
+        return readFileSync(
+          join(config.runsDir, runId, "journal.jsonl"),
+          "utf8",
+        );
       } catch {
         return null;
       }
@@ -114,28 +117,88 @@ export function realApplyDeps(config: Config): ApplyDeps {
       );
     },
 
+    unansweredGates: (runId) => {
+      if (!runIdIsSafe(runId)) return [];
+      const dir = join(config.runsDir, runId, "pending");
+      let entries: string[];
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return [];
+      }
+      const answered = new Set(
+        entries
+          .filter((n) => n.endsWith(".answer.json"))
+          .map((n) => n.slice(0, -".answer.json".length)),
+      );
+      return entries
+        .filter((n) => n.endsWith(".request.json"))
+        .map((n) => n.slice(0, -".request.json".length))
+        .filter((stepId) => !answered.has(stepId));
+    },
+
     resumeRun: (runId) => {
       if (!runIdIsSafe(runId)) {
         throw new Error(`unsafe run id for resume: ${runId}`);
       }
-      execFileSync("yak", ["resume", runId], {
-        cwd: config.yakRepoPath,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        maxBuffer: MAX_BUFFER,
-      });
+      try {
+        const out = execFileSync("yak", ["resume", runId], {
+          cwd: config.yakRepoPath,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          maxBuffer: MAX_BUFFER,
+        });
+        return { ok: true, output: out };
+      } catch (err) {
+        // Non-zero exit — `yak resume` does this whenever the run is left
+        // suspended (re-parked on a new gate). Hand the output back; the
+        // caller checks the journal to tell "advanced" from "broken".
+        const e = err as { status?: number; stdout?: string; stderr?: string };
+        if (typeof e.status === "number") {
+          return { ok: false, output: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+        }
+        throw err; // spawn failure — yak not on PATH, etc.
+      }
     },
 
     addLabel: (issue, label) => {
-      gh([
-        "issue",
-        "edit",
-        String(issue),
-        "--repo",
-        config.repo,
-        "--add-label",
-        label,
-      ]);
+      const edit = () =>
+        gh([
+          "issue",
+          "edit",
+          String(issue),
+          "--repo",
+          config.repo,
+          "--add-label",
+          label,
+        ]);
+      try {
+        edit();
+      } catch (err) {
+        // `gh issue edit --add-label` refuses a label the repo has not
+        // defined. The `yak:<status>` labels are harness-owned (spec §8.1)
+        // — create the missing one and retry once. Idempotent: a
+        // concurrent tick that already created it just makes this a no-op.
+        if (!/not found/i.test(String((err as { stderr?: string }).stderr))) {
+          throw err;
+        }
+        try {
+          gh([
+            "label",
+            "create",
+            label,
+            "--repo",
+            config.repo,
+            "--color",
+            "5319E7",
+            "--description",
+            "yak-harness status label",
+          ]);
+        } catch {
+          // Already exists (race) — fall through to the retry.
+        }
+        edit();
+      }
     },
 
     removeLabel: (issue, label) => {

@@ -7,6 +7,55 @@ file is maintained by hand until a release-please pipeline lands
 
 ## [Unreleased]
 
+### Changed
+
+- The set of runs awaiting a human answer is now derived by scanning the
+  on-disk `<runDir>/pending/*.request.json` contract, not by calling
+  `yak pending --json` — yak 0.3.x has no machine-readable `yak pending`,
+  so the old call always failed and no gate was ever surfaced. The
+  `ObserveDeps.yakPending` method is renamed `pendingRuns`;
+  `parsePendingJson` is replaced by `scanPendingRuns` (found driving
+  spec §26 end-to-end).
+
+### Fixed
+
+- `yak resume` exiting non-zero because the run re-parked on a *later*
+  gate (e.g. `checkpoint` / `approve-pr`) no longer aborts the tick. The
+  gate bridge now checks the journal: a run that advanced or reached a
+  terminal event is a success; only a non-zero resume that moved nothing
+  is a fault (found driving spec §26 end-to-end).
+- `implement-change` workflow: `design` / `design-review` / `plan` now
+  `needs` `scopeDecision`, so `confirm-scope` resolves (human-answered or
+  `skipIf`) before any of them start — previously `confirm-scope` and
+  `design-review` could open as two concurrent gates the harness cannot
+  disambiguate. The dep is on the gate's artifact, not on the `design`
+  agent step: yak writes no artifact for a skipped agent step, so a
+  `needs` on `design` stalls the whole run on the bug/chore path.
+- A gate whose `pending/<step>.request.json` has a sibling
+  `<step>.answer.json` is no longer reported as open — yak leaves the
+  request file in place after an answer, so without this every
+  harness-bridged gate looked permanently pending.
+- Gate bridge holds `yak resume` until **every** concurrently-open gate
+  on a run has an answer file — a run suspended on two parallel gates
+  (e.g. `confirm-scope` + `design-review`) was resumed after the first
+  answer and yak rejected the partial resume, aborting the tick (found
+  driving spec §26 end-to-end).
+- `addLabel` now creates a missing `yak:<status>` label and retries,
+  instead of the tick dying on `gh`'s "label not found" — the status
+  labels are harness-owned (spec §8.1) and needn't be pre-created in the
+  target repo.
+- An unexpected throw from a `gh` / `yak` / filesystem dep during `apply`
+  is caught and turned into a clean aborted tick with a `tick.log` line,
+  not an uncaught stack trace out of cron (spec §5.1, §10.5).
+- Read yak's run journal from `<runDir>/journal.jsonl`, its real
+  filename, instead of `<runDir>/journal` — the latter always `ENOENT`d,
+  so every real launch aborted with "journal has no run.started first
+  event" (found driving spec §26 end-to-end).
+- CLI entry guard now resolves symlinks before comparing `argv[1]` to
+  the module path, so `yak-harness` invoked through npm's `bin` shim (or
+  `npm link`) actually runs instead of silently exiting 0 (found driving
+  spec §26 end-to-end).
+
 ### Added
 
 - `implement-change` workflow (`workflows/implement-change.yaml`, spec

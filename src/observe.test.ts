@@ -94,7 +94,7 @@ function fixtureDeps(
     listComments: (n) => comments[String(n)] ?? [],
     listLaunchBreadcrumbs: () => [],
     listRunBreadcrumbs: () => opts.runBreadcrumbs ?? [],
-    yakPending: () => pending,
+    pendingRuns: () => pending,
     listRunDirs: () =>
       readdirSync(RUNS_DIR, { withFileTypes: true })
         .filter((e) => e.isDirectory())
@@ -102,7 +102,7 @@ function fixtureDeps(
     readRun: (id) => {
       let journal: string | null = null;
       try {
-        journal = readFileSync(join(RUNS_DIR, id, "journal"), "utf8");
+        journal = readFileSync(join(RUNS_DIR, id, "journal.jsonl"), "utf8");
       } catch {
         journal = null;
       }
@@ -756,7 +756,7 @@ describe("observe", () => {
     const quiet = observe(CONFIG, {
       ...fixtureDeps(),
       listIssues: () => [],
-      yakPending: () => [],
+      pendingRuns: () => [],
       listRunDirs: () => [],
     });
     expect(quiet).toMatchObject({

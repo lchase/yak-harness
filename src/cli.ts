@@ -5,6 +5,7 @@
 //
 // `doctor` is implemented (ticket #2). `tick` is still a scaffold.
 
+import { realpathSync } from "node:fs";
 import { argv } from "node:process";
 import { fileURLToPath } from "node:url";
 import { realApplyDeps } from "./apply.js";
@@ -131,7 +132,21 @@ export function cli(argv: string[], io: CliIo): number {
 }
 
 // Only run when invoked as a script, not when imported by a test.
-if (argv[1] && fileURLToPath(import.meta.url) === argv[1]) {
+// `argv[1]` may be a symlink (npm's `bin` shim, `npm link`), so compare
+// both sides after resolving symlinks rather than matching the raw path.
+function invokedAsScript(): boolean {
+  const entry = argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
+  if (entry === self) return true;
+  try {
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedAsScript()) {
   process.exit(
     cli(argv.slice(2), {
       out: (t) => console.log(t),

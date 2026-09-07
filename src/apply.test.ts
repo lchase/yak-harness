@@ -37,6 +37,12 @@ interface FakeOpts {
   pid?: number;
   /** pid → process lookup for the §9.3 stalled kill (absent pid → dead). */
   processes?: Record<number, { isYak: boolean }>;
+  /** runId → step ids of gates still lacking an answer file (multi-gate resume guard). */
+  unansweredGates?: Record<string, string[]>;
+  /** `yak resume` result per runId (default: ok). */
+  resumeResult?: Record<string, { ok: boolean; output: string }>;
+  /** Extra journal lines appended to a run's journal when `resumeRun` is called. */
+  resumeAppendsEvents?: Record<string, string>;
 }
 
 function fake(opts: FakeOpts = {}) {
@@ -65,7 +71,13 @@ function fake(opts: FakeOpts = {}) {
     removeBreadcrumb: (name) => calls.push(`remove ${name}`),
     writeAnswer: (runId, stepId, answer) =>
       calls.push(`answer ${runId}/${stepId} :: ${JSON.stringify(answer)}`),
-    resumeRun: (runId) => calls.push(`resume ${runId}`),
+    unansweredGates: (runId) => opts.unansweredGates?.[runId] ?? [],
+    resumeRun: (runId) => {
+      calls.push(`resume ${runId}`);
+      const extra = opts.resumeAppendsEvents?.[runId];
+      if (extra) journals[runId] = `${journals[runId] ?? ""}\n${extra}`.trim();
+      return opts.resumeResult?.[runId] ?? { ok: true, output: "" };
+    },
     postComment: (issue, body) => {
       calls.push(`comment #${issue} :: ${body.split("\n").pop()}`);
       bodies.push(body);
@@ -268,6 +280,18 @@ describe("apply — relabel (C)", () => {
     const result = apply([relabel({ issue: 7 })], CONFIG, deps);
     expect(result.applied).toEqual(["relabelled #7: running → pr-open"]);
     expect(calls).toEqual(["-label #7 yak:running", "+label #7 yak:pr-open"]);
+  });
+
+  test("an unexpected throw from a dep aborts cleanly, not as an uncaught error", () => {
+    const { deps } = fake();
+    deps.addLabel = () => {
+      throw new Error("gh: boom");
+    };
+    const result = apply([relabel({ issue: 7 })], CONFIG, deps);
+    expect(result.aborted).toBe(true);
+    expect(result.errors).toEqual([
+      "unexpected error applying relabel: gh: boom",
+    ]);
   });
 
   test("from ∅ (marker recovery) → only adds a label", () => {
@@ -528,6 +552,79 @@ describe("apply — gate bridge", () => {
       "resume r1",
       "comment #12 :: <!-- yak-answered run=r1 step=confirm-scope -->",
     ]);
+  });
+
+  test("B: with another gate still unanswered, writes the answer but holds the resume", () => {
+    const { deps, calls } = fake({
+      unansweredGates: { r1: ["design-review"] },
+    });
+    const bAction = (stepId: string): Action => ({
+      kind: "write-answer-and-resume",
+      issue: 12,
+      runId: "r1",
+      stepId,
+      answer: { decision: "approve" },
+      guard: { runSuspended: true, noAnsweredMarkerFor: `r1\t${stepId}` },
+    });
+    const result = apply([bAction("confirm-scope")], CONFIG, deps);
+    expect(result.errors).toEqual([]);
+    expect(calls).toEqual([
+      'answer r1/confirm-scope :: {"decision":"approve"}',
+    ]);
+    expect(result.notes[0]).toMatch(/holding resume of r1.*design-review/);
+  });
+
+  test("B: the last of several gates answered this tick triggers the resume", () => {
+    const { deps, calls } = fake({ unansweredGates: { r1: [] } });
+    const bAction = (stepId: string): Action => ({
+      kind: "write-answer-and-resume",
+      issue: 12,
+      runId: "r1",
+      stepId,
+      answer: { decision: "approve" },
+      guard: { runSuspended: true, noAnsweredMarkerFor: `r1\t${stepId}` },
+    });
+    apply([bAction("design-review")], CONFIG, deps);
+    expect(calls).toEqual([
+      'answer r1/design-review :: {"decision":"approve"}',
+      "resume r1",
+      "comment #12 :: <!-- yak-answered run=r1 step=design-review -->",
+    ]);
+  });
+
+  const resumeB = (stepId = "design-review"): Action => ({
+    kind: "write-answer-and-resume",
+    issue: 12,
+    runId: "r1",
+    stepId,
+    answer: { decision: "approve" },
+    guard: { runSuspended: true, noAnsweredMarkerFor: `r1\t${stepId}` },
+  });
+
+  test("B: `yak resume` exits non-zero but the run advanced → not a fault", () => {
+    const { deps, bodies } = fake({
+      journals: { r1: startedJournal("r1") },
+      resumeResult: {
+        r1: { ok: false, output: "still suspended: approve-pr" },
+      },
+      resumeAppendsEvents: {
+        r1: '{"t":"gate.opened","at":"2026-09-06T09:05:00Z","runId":"r1","stepId":"approve-pr"}',
+      },
+    });
+    const result = apply([resumeB()], CONFIG, deps);
+    expect(result.errors).toEqual([]);
+    expect(result.applied[0]).toMatch(/re-parked on a later gate/);
+    expect(bodies.some((b) => b.includes("yak-answered"))).toBe(true);
+  });
+
+  test("B: `yak resume` exits non-zero and nothing moved → ApplyError, tick aborts", () => {
+    const { deps } = fake({
+      journals: { r1: startedJournal("r1") },
+      resumeResult: { r1: { ok: false, output: "boom: bad run" } },
+    });
+    const result = apply([resumeB()], CONFIG, deps);
+    expect(result.aborted).toBe(true);
+    expect(result.errors[0]).toMatch(/did not advance/);
   });
 
   test("gate-failure relabel posts the hand-write escalation, then moves the label", () => {

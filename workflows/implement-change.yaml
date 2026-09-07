@@ -97,8 +97,14 @@ steps:
           - notes: guidance for the run (required when narrowing)
     produces: scopeDecision
 
+  # Downstream `needs` reference `scopeDecision`, not the `confirm-scope`
+  # step: a skipped GATE still writes its `produces` artifact (from the
+  # schema defaults), so this dep resolves whether the human answers the
+  # gate or `skipIf` fires. Never `needs` a skippable *agent* step
+  # (`design`) — yak writes no artifact for it, so the dependent would
+  # never become eligible and the run would stall with no runnable steps.
   - id: design
-    needs: [assessment]
+    needs: [assessment, scopeDecision]
     skipIf: "!assessment.needsDesign"
     agent:
       prompt:
@@ -119,7 +125,7 @@ steps:
     produces: design
 
   - id: design-review
-    needs: [assessment, input]
+    needs: [assessment, input, scopeDecision]
     skipIf: "!assessment.needsDesign"
     gate:
       schema:
@@ -139,7 +145,7 @@ steps:
     produces: designDecision
 
   - id: plan
-    needs: [assessment, input]
+    needs: [assessment, input, scopeDecision]
     agent:
       prompt:
         inline: |

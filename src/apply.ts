@@ -83,8 +83,21 @@ export interface ApplyDeps {
     stepId: string,
     answer: Record<string, unknown>,
   ): void;
-  /** `yak resume <runId>` in `yakRepoPath` (spec §7.5). Re-derives from the journal. */
-  resumeRun(runId: string): void;
+  /**
+   * Step ids of the run's still-open gates — a `pending/<stepId>.request.json`
+   * with no sibling `<stepId>.answer.json` yet. Used to hold `yak resume`
+   * until every concurrently-open gate on the run has an answer (yak
+   * refuses a partial resume).
+   */
+  unansweredGates(runId: string): string[];
+  /**
+   * `yak resume <runId>` in `yakRepoPath` (spec §7.5). Re-derives from the
+   * journal. Returns `{ ok }` — `ok` is `false` when `yak resume` exits
+   * non-zero, which it does whenever the run is left suspended (it
+   * re-parked on a *new* gate). Only a spawn failure / unsafe id throws;
+   * the caller decides from the journal whether the run advanced.
+   */
+  resumeRun(runId: string): { ok: boolean; output: string };
   /** Add a label to an issue (no-op when already present). */
   addLabel(issue: number, label: string): void;
   /** Remove a label from an issue (no-op when absent). */
@@ -454,13 +467,48 @@ function applyResume(
   result: ApplyResult,
 ): void {
   deps.writeAnswer(action.runId, action.stepId, action.answer);
-  deps.resumeRun(action.runId);
+
+  // A run can have several gates open at once (parallel DAG branches).
+  // `yak resume` refuses until *every* open gate has an answer file, so
+  // hold the resume + the `yak-answered` marker until this tick (or a
+  // later one) has written them all. The answer file itself is written
+  // now and is overwrite-safe, so a partial tick simply retries.
+  const stillOpen = deps
+    .unansweredGates(action.runId)
+    .filter((s) => s !== action.stepId);
+  if (stillOpen.length > 0) {
+    result.notes.push(
+      `wrote gate answer ${action.stepId} on #${action.issue}; holding resume of ${action.runId} for unanswered gate(s): ${stillOpen.join(", ")}`,
+    );
+    return;
+  }
+
+  const eventsBefore = parseJournal(deps.readJournal(action.runId)).length;
+  const { ok, output } = deps.resumeRun(action.runId);
+  const journalAfter = parseJournal(deps.readJournal(action.runId));
+  const advanced = journalAfter.length > eventsBefore;
+  const terminal = journalAfter.at(-1)?.t === "run.finished";
+
+  // `yak resume` exits non-zero when the run is left suspended — normal
+  // when it re-parks on a *new* gate (the multi-phase workflow does this
+  // at `checkpoint` / `approve-pr`). Trust the journal: if the run moved
+  // at all, or reached a terminal event, the resume did its job and the
+  // next tick's `observe` picks up the new state. Only a resume that
+  // exited non-zero *and* moved nothing is a real fault.
+  if (!ok && !advanced && !terminal) {
+    throw new ApplyError(
+      `resume ${action.runId} failed and the run did not advance: ${output.trim().split("\n")[0] ?? "no output"}`,
+    );
+  }
+
   deps.postComment(
     action.issue,
     answeredCommentBody({ runId: action.runId, stepId: action.stepId }),
   );
   result.applied.push(
-    `answered gate ${action.stepId} on #${action.issue}, resumed run ${action.runId}`,
+    advanced && !terminal
+      ? `answered gate ${action.stepId} on #${action.issue}, resumed run ${action.runId} (re-parked on a later gate)`
+      : `answered gate ${action.stepId} on #${action.issue}, resumed run ${action.runId}`,
   );
 }
 
@@ -520,7 +568,14 @@ export function apply(
         result.aborted = true;
         return result;
       }
-      throw err;
+      // An unexpected throw from a dep (a `gh`/`yak` non-zero exit, an
+      // I/O error) is still a harness fault: abort and leave state for a
+      // human, but as a clean exit-1 with a `tick.log` line rather than
+      // an uncaught stack trace out of a cron job (spec §5.1, §10.5).
+      const detail = err instanceof Error ? err.message : String(err);
+      result.errors.push(`unexpected error applying ${action.kind}: ${detail}`);
+      result.aborted = true;
+      return result;
     }
   }
 

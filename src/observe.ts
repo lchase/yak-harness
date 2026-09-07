@@ -289,8 +289,13 @@ export interface ObserveDeps {
    * `null` degrades that one issue to a fault; it never aborts the tick.
    */
   listComments(issueNumber: number): RawComment[] | null;
-  /** Parsed + boundary-validated `yak pending`; malformed entries dropped. */
-  yakPending(): RawPendingRun[];
+  /**
+   * Runs with an open gate, derived from the on-disk
+   * `<runId>/pending/*.request.json` contract (spec §7.1). yak has no
+   * machine-readable `yak pending`, so this is a disk scan, not a CLI
+   * call; malformed request files are dropped loudly (invariant 2).
+   */
+  pendingRuns(): RawPendingRun[];
   /** Directory names directly under `runsDir`. */
   listRunDirs(): string[];
   /**
@@ -679,9 +684,10 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     recordedPids.set(b.runId, b.pid);
   }
 
-  // 2. `yak pending` — run id, open steps, per-step kind + first rendered
-  //    line, plus the full gate request for `kind: "gate"` steps (spec §7).
-  const pending: PendingRun[] = deps.yakPending().map((p) => ({
+  // 2. Open gates from disk (`pending/*.request.json`) — run id, open
+  //    steps, per-step kind + rendered prose, plus the full gate request
+  //    for `kind: "gate"` steps (spec §7).
+  const pending: PendingRun[] = deps.pendingRuns().map((p) => ({
     runId: p.runId,
     steps: p.steps.map((step) => ({
       stepId: step.stepId,
