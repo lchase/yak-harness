@@ -73,7 +73,7 @@ effort.
 
 <!-- one line per closed ticket -->
 
-- [01 — Run ↔ issue linkage](tickets/01-run-issue-linkage.md) — harness
+- [01 — Run ↔ issue linkage](decisions/01-run-issue-linkage.md) — harness
   owns the mapping, keeps it in the tracker only: capture the run id by
   snapshot-diffing `.runs/` around a serial `yak run` (cap=1), then post
   an HTML-comment marker on the originating issue; each tick rebuilds
@@ -85,7 +85,7 @@ effort.
   `yak run --tag <str>` (journal + `yak pending`), and run id to stderr
   at launch.
 
-- [02 — Reconciler tick algorithm](tickets/02-reconciler-tick-algorithm.md)
+- [02 — Reconciler tick algorithm](decisions/02-reconciler-tick-algorithm.md)
   — one `observe() -> plan(observation) -> apply(actions)` function per
   tick; `plan` pure (zero I/O, no-mock testable). `observe` does all
   reads in one shot: one `gh` issue query (+ marker parse both ways),
@@ -102,7 +102,7 @@ effort.
   03's pure transition table `(labelState, runClass) ->
   (target, action)`; no label strings in 02.
 
-- [03 — Backlog label lifecycle state machine](tickets/03-backlog-label-lifecycle.md)
+- [03 — Backlog label lifecycle state machine](decisions/03-backlog-label-lifecycle.md)
   — one harness-owned single-valued `yak:<status>` label = the whole
   state machine. Six states: `yak`-only/∅ (qualified, not launched),
   `yak:running`, `yak:waiting` (gate, human reply needed),
@@ -119,7 +119,7 @@ effort.
   permanent. Consumed by ticket 02's `plan` as the pure transition
   table.
 
-- [04 — Gate-bridge interaction design](tickets/04-gate-bridge-interaction.md)
+- [04 — Gate-bridge interaction design](decisions/04-gate-bridge-interaction.md)
   — harness renders the reply contract **generically from
   `answerSchema`** (flat scalar/enum objects only; nested → hand-write
   + `yak:failed`), never per-gate-kind. Posts `rendered` verbatim +
@@ -136,7 +136,7 @@ effort.
   idempotent. Prototype:
   [`prototype-gate-bridge.md`](prototype-gate-bridge.md).
 
-- [05 — Failure / retry policy](tickets/05-failure-retry-policy.md) —
+- [05 — Failure / retry policy](decisions/05-failure-retry-policy.md) —
   retry **iff yak's own `StepFailure.recoverable === true`** and
   `attempt < 2` (attempt count = number of `yak-harness run=` markers
   on the issue; no new marker). Retry = fresh `yak run`, next free
@@ -150,7 +150,7 @@ effort.
   (`reason`+`detail` / stall / no-PR), attempts tried, recovery steps.
   No `@`-mention v1. Candidate yak ticket: `yak cancel <run-id>`.
 
-- [06 — Config surface](tickets/06-config-surface.md) — one plain-JSON
+- [06 — Config surface](decisions/06-config-surface.md) — one plain-JSON
   file, `--config <path>` on `harness tick`, **zod-parsed at startup**
   (bad config / no `gh` auth / no yak → non-zero exit, no partial
   tick). Configurable: `repo`, `yakRepoPath`, `runsDir?`,
@@ -165,7 +165,7 @@ effort.
   sentence noting it as a future pure-cache optimisation. Amended
   tickets 01 + 02 for cap=1 → cap=`maxConcurrent`.
 
-- [07 — Deployment & packaging shape](tickets/07-deployment-packaging.md)
+- [07 — Deployment & packaging shape](decisions/07-deployment-packaging.md)
   — standalone **`yak-harness`** GitHub repo, **fully decoupled** from
   yak (re-declares the 3 on-disk shapes as zod schemas; `yak` is a
   PATH runtime requirement, not a build dep). TS/ESM/Node22, tsup,

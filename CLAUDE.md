@@ -136,7 +136,10 @@ One plain-JSON file, path passed as `--config <path>` to every
 invocation, `zod`-parsed at startup before any observation. Required:
 `repo`, `yakRepoPath`, `stalledAfterMinutes` (**no default** — operator
 must set it). Defaults: `qualifyingLabel` `"yak"`, `maxConcurrent` `2`,
-`workflow` `"fix-defect"`.
+`workflow` `"implement-change"` (spec §4.1 — one workflow spanning
+bug / feature / chore; `design`/`design-review`/`docs` self-skip via
+`skipIf` off the `assess` step; the `deliver` loop bridges review
+findings back to `build`, bounded, then suspends).
 
 **Locked constants** are `const` in source, not config — each carries a
 `// config candidate if a real need appears` comment: gate re-prompt
