@@ -37,6 +37,8 @@ interface FakeOpts {
   pid?: number;
   /** pid → process lookup for the §9.3 stalled kill (absent pid → dead). */
   processes?: Record<number, { isYak: boolean }>;
+  /** runId → step ids of gates still lacking an answer file (multi-gate resume guard). */
+  unansweredGates?: Record<string, string[]>;
 }
 
 function fake(opts: FakeOpts = {}) {
@@ -65,6 +67,7 @@ function fake(opts: FakeOpts = {}) {
     removeBreadcrumb: (name) => calls.push(`remove ${name}`),
     writeAnswer: (runId, stepId, answer) =>
       calls.push(`answer ${runId}/${stepId} :: ${JSON.stringify(answer)}`),
+    unansweredGates: (runId) => opts.unansweredGates?.[runId] ?? [],
     resumeRun: (runId) => calls.push(`resume ${runId}`),
     postComment: (issue, body) => {
       calls.push(`comment #${issue} :: ${body.split("\n").pop()}`);
@@ -539,6 +542,44 @@ describe("apply — gate bridge", () => {
       'answer r1/confirm-scope :: {"decision":"proceed"}',
       "resume r1",
       "comment #12 :: <!-- yak-answered run=r1 step=confirm-scope -->",
+    ]);
+  });
+
+  test("B: with another gate still unanswered, writes the answer but holds the resume", () => {
+    const { deps, calls } = fake({
+      unansweredGates: { r1: ["design-review"] },
+    });
+    const bAction = (stepId: string): Action => ({
+      kind: "write-answer-and-resume",
+      issue: 12,
+      runId: "r1",
+      stepId,
+      answer: { decision: "approve" },
+      guard: { runSuspended: true, noAnsweredMarkerFor: `r1\t${stepId}` },
+    });
+    const result = apply([bAction("confirm-scope")], CONFIG, deps);
+    expect(result.errors).toEqual([]);
+    expect(calls).toEqual([
+      'answer r1/confirm-scope :: {"decision":"approve"}',
+    ]);
+    expect(result.notes[0]).toMatch(/holding resume of r1.*design-review/);
+  });
+
+  test("B: the last of several gates answered this tick triggers the resume", () => {
+    const { deps, calls } = fake({ unansweredGates: { r1: [] } });
+    const bAction = (stepId: string): Action => ({
+      kind: "write-answer-and-resume",
+      issue: 12,
+      runId: "r1",
+      stepId,
+      answer: { decision: "approve" },
+      guard: { runSuspended: true, noAnsweredMarkerFor: `r1\t${stepId}` },
+    });
+    apply([bAction("design-review")], CONFIG, deps);
+    expect(calls).toEqual([
+      'answer r1/design-review :: {"decision":"approve"}',
+      "resume r1",
+      "comment #12 :: <!-- yak-answered run=r1 step=design-review -->",
     ]);
   });
 

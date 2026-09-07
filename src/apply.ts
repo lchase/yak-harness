@@ -83,6 +83,13 @@ export interface ApplyDeps {
     stepId: string,
     answer: Record<string, unknown>,
   ): void;
+  /**
+   * Step ids of the run's still-open gates — a `pending/<stepId>.request.json`
+   * with no sibling `<stepId>.answer.json` yet. Used to hold `yak resume`
+   * until every concurrently-open gate on the run has an answer (yak
+   * refuses a partial resume).
+   */
+  unansweredGates(runId: string): string[];
   /** `yak resume <runId>` in `yakRepoPath` (spec §7.5). Re-derives from the journal. */
   resumeRun(runId: string): void;
   /** Add a label to an issue (no-op when already present). */
@@ -454,6 +461,22 @@ function applyResume(
   result: ApplyResult,
 ): void {
   deps.writeAnswer(action.runId, action.stepId, action.answer);
+
+  // A run can have several gates open at once (parallel DAG branches).
+  // `yak resume` refuses until *every* open gate has an answer file, so
+  // hold the resume + the `yak-answered` marker until this tick (or a
+  // later one) has written them all. The answer file itself is written
+  // now and is overwrite-safe, so a partial tick simply retries.
+  const stillOpen = deps
+    .unansweredGates(action.runId)
+    .filter((s) => s !== action.stepId);
+  if (stillOpen.length > 0) {
+    result.notes.push(
+      `wrote gate answer ${action.stepId} on #${action.issue}; holding resume of ${action.runId} for unanswered gate(s): ${stillOpen.join(", ")}`,
+    );
+    return;
+  }
+
   deps.resumeRun(action.runId);
   deps.postComment(
     action.issue,

@@ -117,6 +117,26 @@ export function realApplyDeps(config: Config): ApplyDeps {
       );
     },
 
+    unansweredGates: (runId) => {
+      if (!runIdIsSafe(runId)) return [];
+      const dir = join(config.runsDir, runId, "pending");
+      let entries: string[];
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return [];
+      }
+      const answered = new Set(
+        entries
+          .filter((n) => n.endsWith(".answer.json"))
+          .map((n) => n.slice(0, -".answer.json".length)),
+      );
+      return entries
+        .filter((n) => n.endsWith(".request.json"))
+        .map((n) => n.slice(0, -".request.json".length))
+        .filter((stepId) => !answered.has(stepId));
+    },
+
     resumeRun: (runId) => {
       if (!runIdIsSafe(runId)) {
         throw new Error(`unsafe run id for resume: ${runId}`);

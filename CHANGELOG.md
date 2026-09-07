@@ -19,6 +19,11 @@ file is maintained by hand until a release-please pipeline lands
 
 ### Fixed
 
+- Gate bridge holds `yak resume` until **every** concurrently-open gate
+  on a run has an answer file — a run suspended on two parallel gates
+  (e.g. `confirm-scope` + `design-review`) was resumed after the first
+  answer and yak rejected the partial resume, aborting the tick (found
+  driving spec §26 end-to-end).
 - `addLabel` now creates a missing `yak:<status>` label and retries,
   instead of the tick dying on `gh`'s "label not found" — the status
   labels are harness-owned (spec §8.1) and needn't be pre-created in the
