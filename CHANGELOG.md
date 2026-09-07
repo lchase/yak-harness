@@ -7,6 +7,13 @@ file is maintained by hand until a release-please pipeline lands
 
 ## [Unreleased]
 
+### Fixed
+
+- CLI entry guard now resolves symlinks before comparing `argv[1]` to
+  the module path, so `yak-harness` invoked through npm's `bin` shim (or
+  `npm link`) actually runs instead of silently exiting 0 (found driving
+  spec §26 end-to-end).
+
 ### Added
 
 - `implement-change` workflow (`workflows/implement-change.yaml`, spec
