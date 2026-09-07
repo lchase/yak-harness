@@ -198,6 +198,12 @@ export interface Observation {
   stale: StaleMarker[];
   /** Run ids shared by two+ issues (spec §5.5). Each involved issue also carries a `fault`. */
   linkageFaults: LinkageFault[];
+  /**
+   * Run ids that already carry a `<!-- yak-failed run=<id> -->` escalation
+   * comment on their issue (spec §9.4). Makes the one escalation comment
+   * idempotent across ticks.
+   */
+  escalated: string[];
 }
 
 // ── Injected reads ────────────────────────────────────────────────────
@@ -284,6 +290,22 @@ export function parseMarkers(comments: RawComment[]): RunMarker[] {
     }
   }
   return markers;
+}
+
+const FAILED_MARKER_RE = /<!--\s*yak-failed\s+run=(\S+)\s*-->/g;
+
+/**
+ * Run ids that already carry a `<!-- yak-failed run=<id> -->` escalation
+ * comment on this issue (spec §9.4). `plan` uses the set to make the one
+ * escalation comment idempotent across ticks even if a tick dies between
+ * posting it and moving the label.
+ */
+export function parseFailedMarkers(comments: RawComment[]): string[] {
+  const runIds: string[] = [];
+  for (const comment of comments) {
+    for (const m of comment.body.matchAll(FAILED_MARKER_RE)) runIds.push(m[1]!);
+  }
+  return runIds;
 }
 
 export interface LabelReading {
@@ -533,6 +555,7 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
       raw,
       reading,
       markers: comments ? parseMarkers(comments) : [],
+      failedMarkers: comments ? parseFailedMarkers(comments) : [],
       commentsUnreadable: comments === null,
     };
   });
@@ -625,6 +648,7 @@ export function observe(config: Config, deps: ObserveDeps): Observation {
     orphans: findOrphans(runs, pending, markedRunIds, runDirSet, recovery),
     stale: findStaleMarkers(issues, runDirSet),
     linkageFaults: link.faults,
+    escalated: [...new Set(scanned.flatMap((s) => s.failedMarkers))],
   };
 }
 

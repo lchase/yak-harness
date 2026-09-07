@@ -76,6 +76,25 @@ file is maintained by hand until a release-please pipeline lands
   and `FlagOrphanAction` carry a `recovery` field; `ApplyResult` gains a
   non-load-bearing `notes` channel. The §9.4 escalation comment on a
   relabel into `yak:failed` stays deferred to the failure/retry work.
+- Failure retry policy + `yak:failed` escalation comment (`src/plan.ts`,
+  `src/apply.ts`, spec §9.1, §9.2, §9.4). A move into `yak:failed` off a
+  run whose terminal `StepFailure` yak marked `recoverable: true`, while
+  the issue's marker-count attempt counter is `< 2`, is pre-empted by an
+  **auto-retry** — a fresh `yak run` (new id, new marker, last-wins),
+  never `yak resume`. The retry is a launch like any other: cap-consuming,
+  at most one per tick, retries ordered before backlog launches.
+  `recoverable: false`, a stale marker, a stalled run, `ok`-no-PR and
+  `ok`-PR-closed all route straight to `yak:failed`; a second failure
+  does too regardless of `recoverable` (hard cap 2). On every transition
+  into `yak:failed` `apply` posts **one** escalation comment — what
+  broke (`reason: detail`, or "produced no PR", …), what was tried
+  ("attempt 2 of 2" / "not retried — `tool-denied` not recoverable"),
+  what the human does — guarded by a `<!-- yak-failed run=<id> -->`
+  marker that `observe` now parses (`parseFailedMarkers`,
+  `Observation.escalated`) so the post is idempotent across ticks.
+  `LaunchRunAction` gains an optional `retry`; `RelabelAction` gains
+  `escalation`; `transition.launchTarget()` names the post-launch label
+  so neither `plan` nor `apply` hard-codes it.
 - `realApplyDeps` (`src/apply-deps.ts`) — the write-side `gh` / `yak` /
   filesystem boundary: detached `spawn` + `unref`, idempotent `gh issue
   edit` label ops (absent-label removal swallowed), JSON breadcrumbs

@@ -12,6 +12,7 @@ import {
   type Observation,
   type ObserveDeps,
   observe,
+  parseFailedMarkers,
   parseJournal,
   parseMarkers,
   prStateFrom,
@@ -135,6 +136,24 @@ describe("parseMarkers", () => {
     expect(
       parseMarkers([comment("<!-- yak-harness run=r1 branch=yak/r1 -->")]),
     ).toEqual([]);
+  });
+});
+
+// ── parseFailedMarkers ──────────────────────────────────────────────
+
+describe("parseFailedMarkers", () => {
+  test("collects every yak-failed run id, in order", () => {
+    expect(
+      parseFailedMarkers([
+        comment("run broke\n<!-- yak-failed run=r1 -->"),
+        comment("chatter"),
+        comment("<!-- yak-failed run=r2 -->"),
+      ]),
+    ).toEqual(["r1", "r2"]);
+  });
+
+  test("no yak-failed comment → empty", () => {
+    expect(parseFailedMarkers([comment("just talking")])).toEqual([]);
   });
 });
 
@@ -463,6 +482,7 @@ describe("observe", () => {
         "launchBreadcrumbs",
         "gatesPosted",
         "gateReplies",
+        "escalated",
       ].sort(),
     );
   });

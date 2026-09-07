@@ -185,6 +185,51 @@ describe("apply — launch (D)", () => {
     expect(calls.some((c) => c.startsWith("comment"))).toBe(false);
   });
 
+  test("a §9.1 retry launch: same flow, plus it reports the attempt", () => {
+    const { deps, calls } = fake();
+    const retry: Action = {
+      kind: "launch-run",
+      issue: 1,
+      to: "running",
+      retry: { failedRunId: "r1", from: "running", attempt: 2 },
+      guard: {
+        inFlightCount: 0,
+        maxConcurrent: 2,
+        noLaunchBreadcrumb: true,
+        recoverableFailure: true,
+        attemptCount: 1,
+      },
+    };
+    const result = apply([retry], CONFIG, deps);
+    expect(result.aborted).toBe(false);
+    // from === to === running → no spurious -label
+    expect(calls).not.toContain("-label #1 yak:running");
+    expect(calls).toContain("+label #1 yak:running");
+    expect(result.applied[0]).toMatch(
+      /retry attempt 2 \(was r1\) run run-new for #1/,
+    );
+  });
+
+  test("a retry from yak:waiting moves the status label off waiting", () => {
+    const { deps, calls } = fake();
+    const retry: Action = {
+      kind: "launch-run",
+      issue: 1,
+      to: "running",
+      retry: { failedRunId: "r1", from: "waiting", attempt: 2 },
+      guard: {
+        inFlightCount: 0,
+        maxConcurrent: 2,
+        noLaunchBreadcrumb: true,
+        recoverableFailure: true,
+        attemptCount: 1,
+      },
+    };
+    apply([retry], CONFIG, deps);
+    expect(calls).toContain("+label #1 yak:running");
+    expect(calls).toContain("-label #1 yak:waiting");
+  });
+
   test("at most one launch per tick — a second launch action is refused", () => {
     const { deps, calls } = fake();
     const result = apply([launch(1), launch(2)], CONFIG, deps);
@@ -232,15 +277,37 @@ describe("apply — relabel (C)", () => {
     expect(calls).toEqual(["+label #7 yak:running"]);
   });
 
-  test("escalate → label still moves, §9.4 comment recorded as deferred", () => {
+  test("escalate → posts the one §9.4 comment (before the label move), then moves the label", () => {
     const { deps, calls } = fake();
     const result = apply(
-      [relabel({ issue: 7, to: "failed", escalate: true })],
+      [
+        relabel({
+          issue: 7,
+          to: "failed",
+          escalate: true,
+          escalation: {
+            broke: "command-failed: boom",
+            tried: "attempt 2 of 2",
+          },
+        }),
+      ],
       CONFIG,
       deps,
     );
+    expect(calls).toEqual([
+      "comment #7 :: <!-- yak-failed run=r1 -->",
+      "-label #7 yak:running",
+      "+label #7 yak:failed",
+    ]);
+    expect(result.applied[0]).toMatch(
+      /§9\.4 escalation comment on #7 for run r1/,
+    );
+  });
+
+  test("escalate:false → label moves, no comment (a prior tick already escalated)", () => {
+    const { deps, calls } = fake();
+    apply([relabel({ issue: 7, to: "failed", escalate: false })], CONFIG, deps);
     expect(calls).toEqual(["-label #7 yak:running", "+label #7 yak:failed"]);
-    expect(result.skipped[0]).toMatch(/§9\.4 escalation/);
   });
 });
 

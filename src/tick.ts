@@ -6,6 +6,7 @@
 
 import { type ApplyDeps, type ApplyResult, apply } from "./apply.js";
 import type { Config } from "./config.js";
+import { MAX_RUN_ATTEMPTS } from "./constants.js";
 import { type ObserveDeps, observe } from "./observe.js";
 import { type Action, plan } from "./plan.js";
 
@@ -29,7 +30,7 @@ export interface TickOptions {
 export function describeAction(a: Action): string {
   switch (a.kind) {
     case "launch-run":
-      return `launch-run   #${a.issue} → yak:${a.to}`;
+      return `launch-run   #${a.issue} → yak:${a.to}${a.retry ? ` (retry ${a.retry.attempt}/${MAX_RUN_ATTEMPTS})` : ""}`;
     case "relabel":
       return `relabel      #${a.issue} ${a.from} → yak:${a.to}${a.escalate ? " (escalate)" : ""}`;
     case "post-gate-comment":

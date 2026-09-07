@@ -62,6 +62,7 @@ const obs = (o: Partial<Observation>): Observation => ({
   orphans: [],
   stale: [],
   linkageFaults: [],
+  escalated: [],
   ...o,
 });
 
@@ -315,6 +316,189 @@ describe("plan — precedence", () => {
       }),
     );
     expect(kinds(actions)).toEqual([]);
+  });
+});
+
+// ── §9.1 auto-retry + §9.4 escalation ───────────────────────────────
+
+const failure = (recoverable: boolean) => ({
+  reason: recoverable ? "command-failed" : "tool-denied",
+  detail: "npm test exited 1",
+  recoverable,
+});
+
+describe("plan — §9.1 retry", () => {
+  test("recoverable failure, 1 marker → a fresh retry launch, no relabel", () => {
+    const i = linked(1, "r1", "running");
+    const actions = plan(
+      obs({
+        issues: [i],
+        runs: [
+          run({ id: "r1", class: "failed", terminalFailure: failure(true) }),
+        ],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["launch-run"]);
+    expect(actions[0]).toMatchObject({
+      kind: "launch-run",
+      issue: 1,
+      retry: { failedRunId: "r1", from: "running", attempt: 2 },
+    });
+  });
+
+  test("recoverable failure, 2 markers (cap hit) → relabel to failed, no retry", () => {
+    const i = {
+      ...linked(1, "r2", "running"),
+      attemptCount: 2,
+      markers: [
+        { runId: "r1", branch: "b", launched: "t" },
+        { runId: "r2", branch: "b", launched: "t" },
+      ],
+    };
+    const actions = plan(
+      obs({
+        issues: [i],
+        runs: [
+          run({ id: "r2", class: "failed", terminalFailure: failure(true) }),
+        ],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["relabel"]);
+    expect(actions[0]).toMatchObject({ to: "failed", escalate: true });
+    expect(
+      (actions[0] as { escalation: { tried: string } }).escalation.tried,
+    ).toMatch(/attempt 2 of 2/);
+  });
+
+  test("non-recoverable failure → straight to yak:failed, escalation names the reason", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(1, "r1", "running")],
+        runs: [
+          run({ id: "r1", class: "failed", terminalFailure: failure(false) }),
+        ],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["relabel"]);
+    expect(
+      (actions[0] as { escalation: { tried: string } }).escalation.tried,
+    ).toMatch(/tool-denied.*not recoverable/);
+  });
+
+  test("ok run with no PR → yak:failed with the produced-no-PR reason, not retried", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(1, "r1", "running")],
+        runs: [run({ id: "r1", class: "ok", pr: "missing" })],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["relabel"]);
+    const esc = (actions[0] as { escalation: { broke: string; tried: string } })
+      .escalation;
+    expect(esc.broke).toMatch(/produced no PR/);
+    expect(esc.tried).toMatch(/not a failure/);
+  });
+
+  test("a retry counts against the cap like any launch", () => {
+    const actions = plan(
+      obs({
+        maxConcurrent: 1,
+        issues: [
+          linked(1, "r1", "running"), // failed, retry wants a slot
+          linked(2, "r2", "waiting"), // suspended → fills the cap
+        ],
+        runs: [
+          run({ id: "r1", class: "failed", terminalFailure: failure(true) }),
+          run({ id: "r2", class: "suspended" }),
+        ],
+      }),
+    );
+    expect(kinds(actions)).not.toContain("launch-run");
+  });
+
+  test("escalation is suppressed when a yak-failed comment already exists", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(1, "r1", "running")],
+        runs: [
+          run({ id: "r1", class: "failed", terminalFailure: failure(false) }),
+        ],
+        escalated: ["r1"],
+      }),
+    );
+    expect(actions[0]).toMatchObject({ to: "failed", escalate: false });
+    expect((actions[0] as { escalation?: unknown }).escalation).toBeUndefined();
+  });
+
+  test("an in-progress launch breadcrumb holds the move into yak:failed (no premature escalation)", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(1, "r1", "running")],
+        runs: [
+          run({ id: "r1", class: "failed", terminalFailure: failure(false) }),
+        ],
+        launchBreadcrumbs: [1],
+      }),
+    );
+    expect(actions).toEqual([]);
+  });
+
+  test("a stalled run escalates with the never-retries reason", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(1, "r1", "running")],
+        runs: [run({ id: "r1", class: "stalled" })],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["relabel"]);
+    const esc = (actions[0] as { escalation: { broke: string; tried: string } })
+      .escalation;
+    expect(esc.broke).toMatch(/stalled/);
+    expect(esc.tried).toMatch(/never retry/);
+  });
+
+  test("a failed run with no terminal StepFailure still escalates (not retried)", () => {
+    const actions = plan(
+      obs({
+        issues: [linked(1, "r1", "running")],
+        runs: [run({ id: "r1", class: "failed", terminalFailure: null })],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["relabel"]);
+    expect(
+      (actions[0] as { escalation: { broke: string } }).escalation.broke,
+    ).toMatch(/no terminal StepFailure/);
+  });
+
+  test("a retry beats a backlog launch for the single per-tick slot", () => {
+    const actions = plan(
+      obs({
+        maxConcurrent: 2,
+        issues: [
+          issue({ number: 1 }), // backlog D
+          linked(2, "r2", "running"), // recoverable failure → retry
+        ],
+        runs: [
+          run({ id: "r2", class: "failed", terminalFailure: failure(true) }),
+        ],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["launch-run"]);
+    expect(actions[0]).toMatchObject({ issue: 2, retry: { attempt: 2 } });
+  });
+
+  test("retry pre-empts relabel only while the issue keeps the qualifying label", () => {
+    const i = { ...linked(1, "r1", "running"), qualifying: false };
+    const actions = plan(
+      obs({
+        issues: [i],
+        runs: [
+          run({ id: "r1", class: "failed", terminalFailure: failure(true) }),
+        ],
+      }),
+    );
+    expect(kinds(actions)).toEqual(["relabel"]);
+    expect(actions[0]).toMatchObject({ to: "failed" });
   });
 });
 

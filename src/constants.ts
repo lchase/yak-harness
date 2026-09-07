@@ -124,3 +124,25 @@ export const LAUNCH_POLL_TIMEOUT_MS = 15_000; // config candidate if a real need
 /** Guards the single escalation comment on entry to `yak:failed` (spec §9.4). */
 export const failedMarker = (args: { run: string }): string =>
   `<!-- yak-failed run=${args.run} -->`;
+
+/**
+ * The one escalation comment posted on every transition into `yak:failed`
+ * (spec §9.4): what broke, what the harness tried, what the human does —
+ * plus the {@link failedMarker} that makes the post idempotent. `broke`
+ * and `tried` are composed by `plan` (a pure function of the
+ * `Observation`); this builder owns only the fixed prose + layout.
+ */
+export const failedComment = (args: {
+  run: string;
+  broke: string;
+  tried: string;
+}): string =>
+  [
+    `🛑 **yak run \`${args.run}\` needs a human — moved to \`${YAK_STATUS_PREFIX}failed\`.**`,
+    "",
+    `**What broke:** ${args.broke}`,
+    `**What was tried:** ${args.tried}`,
+    `**What to do:** inspect \`.runs/${args.run}/journal\`, then either fix the cause and relabel \`yak\` (drop \`${YAK_STATUS_PREFIX}failed\`) for a clean relaunch, or close the issue.`,
+    "",
+    failedMarker({ run: args.run }),
+  ].join("\n");
