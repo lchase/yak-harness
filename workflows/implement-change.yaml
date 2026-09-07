@@ -7,14 +7,21 @@
 # against any repo yak is pointed at.
 #
 # v1 deviations from the §4.1 sketch (tracked for a follow-up):
-#   - `deliver` is a `build -> integrate` loop; the agent self-corrects
-#     via its own test runs. The `review` (map) + `rank` (transform)
-#     fan-out is not here yet.
+#   - `deliver` is linear `build -> verify -> checkpoint`, not a bounded
+#     `loop`. The `build` agent self-corrects via its own test runs;
+#     `verify` is the deterministic gate; `checkpoint` suspends for a
+#     human iff `verify` is still red. yak's `loop` can't expose an
+#     artifact to downstream steps, so a real retry loop would leave
+#     `approve-pr` unordered against it. The `review`/`rank` fan-out is
+#     also not here yet.
 #   - `design-review` has no confidence auto-skip — a human reviews
 #     every design.
 #   - feature steps pass state through worktree files (DESIGN.md), not
 #     artifacts, because a skipped step writes no artifact for a
 #     downstream `needs` to read.
+#
+# Artifact names referenced in `skipIf` must be jexl identifiers — no
+# hyphens (`verify-result` parses as subtraction). Step ids may hyphenate.
 
 name: implement-change
 version: "1"
@@ -88,7 +95,7 @@ steps:
 
           - decision: proceed | narrow | abort
           - notes: guidance for the run (required when narrowing)
-    produces: scope-decision
+    produces: scopeDecision
 
   - id: design
     needs: [assessment]
@@ -129,7 +136,7 @@ steps:
 
           - decision: approve | rework
           - notes: what to change (required when reworking)
-    produces: design-decision
+    produces: designDecision
 
   - id: plan
     needs: [assessment, input]
@@ -149,54 +156,82 @@ steps:
       tools: [Read, Grep, Glob]
     produces: plan
 
-  - id: deliver
+  # --- deliver ---------------------------------------------------------
+  # A linear build -> verify -> checkpoint. yak's `loop` combinator can't
+  # yet expose an artifact to downstream steps (a `loop` step's
+  # `produces` is a no-op), so the bounded retry loop the §4.1 sketch
+  # draws would leave `approve-pr` unordered against it. The `build`
+  # agent runs and fixes the checks itself; `verify` is the deterministic
+  # gate; `checkpoint` suspends for a human iff `verify` is still red.
+
+  - id: build
     needs: [plan, input]
-    loop:
-      until: "verify.exitCode == 0"
-      budget:
-        maxIterations: 3
-        noProgress:
-          signal: "verify.exitCode"
-          rounds: 2
-      onExhausted: suspend
-      body:
-        - id: build
-          needs: [plan, input]
-          agent:
-            prompt:
-              inline: |
-                Implement {{input.issueRef}} in the working tree, following
-                this plan:
+    agent:
+      prompt:
+        inline: |
+          Implement {{input.issueRef}} in the working tree, following this
+          plan:
 
-                {{plan.steps}}
+          {{plan.steps}}
 
-                If `DESIGN.md` exists at the repo root, follow it.
+          If `DESIGN.md` exists at the repo root, follow it.
 
-                Then run `npm test`, `npm run typecheck` and `npm run
-                build` yourself and fix everything red before you finish —
-                a separate check re-runs all three and the run does not
-                progress until they pass. If a previous attempt left
-                failures, diagnose and fix them; do not start over.
-            tools: [Read, Grep, Glob, Edit, Write, Bash]
-          produces: build-note
+          Then run `npm test`, `npm run typecheck` and `npm run build`
+          yourself and fix everything red before you finish — a separate
+          check re-runs all three and the run stops for a human if they
+          do not pass.
 
-        - id: verify
-          needs: [build-note]
-          command:
-            run: "npm test && npm run typecheck && npm run build"
-            failOn: never
-            capture: [exitCode]
-          produces: verify
+          When everything passes, stage and commit all your changes:
+          `git add -A && git commit -m "<concise message referencing
+          {{input.issueRef}}>"`. The run opens a PR from this commit.
+      schema:
+        inline:
+          type: object
+          properties:
+            summary: { type: string }
+          required: [summary]
+      tools: [Read, Grep, Glob, Edit, Write, Bash]
+    produces: buildNote
+
+  - id: verify
+    needs: [buildNote]
+    command:
+      run: "npm test && npm run typecheck && npm run build"
+      failOn: never
+      capture: [stdout, stderr, exitCode]
+    produces: verifyResult
+
+  - id: checkpoint
+    needs: [verifyResult, input]
+    skipIf: "verifyResult.exitCode == 0"
+    gate:
+      schema:
+        inline:
+          type: object
+          properties:
+            decision: { type: string, enum: [proceed, investigate, abandon], default: proceed }
+            notes: { type: string, default: "" }
+          required: [decision]
+      render:
+        inline: |
+          **{{input.issueRef}}** — implementation is done but `npm test &&
+          npm run typecheck && npm run build` is still RED on the run
+          branch. The harness stopped here rather than open a broken PR.
+
+          - decision: investigate (a human takes the branch) | abandon | proceed (open the PR anyway)
+          - notes: what you found
+    produces: checkpoint
 
   - id: docs
-    needs: [assessment, input]
+    needs: [assessment, input, checkpoint]
     skipIf: "!assessment.needsDocs"
     agent:
       prompt:
         inline: |
           The code change for {{input.issueRef}} ({{assessment.summary}})
-          is already implemented in the working tree. Update the
-          user-facing docs (README and similar) to match.
+          is already implemented and committed. Update the user-facing
+          docs (README and similar) to match, then
+          `git add -A && git commit -m "docs: ..."`.
       schema:
         inline:
           type: object
@@ -204,12 +239,11 @@ steps:
             summary: { type: string }
           required: [summary]
       tools: [Read, Grep, Glob, Edit, Write]
-    produces: docs-note
+    produces: docsNote
 
   - id: approve-pr
-    needs: [assessment, input]
+    needs: [assessment, input, checkpoint]
     gate:
-      # render references {{input.issueRef}} and {{assessment.summary}}
       schema:
         inline:
           type: object
@@ -227,11 +261,11 @@ steps:
 
           - decision: approve | reject
           - notes: reason for rejecting (required when rejecting)
-    produces: pr-decision
+    produces: prDecision
 
   - id: open-pr
-    needs: [pr-decision]
-    skipIf: "pr-decision.decision != 'approve'"
+    needs: [prDecision]
+    skipIf: "prDecision.decision != 'approve'"
     command:
       run: 'git push -u origin HEAD && gh pr create --fill'
       capture: [stdout, stderr, exitCode]

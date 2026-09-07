@@ -148,13 +148,30 @@ own reference workflow (yak spec §7), the baseline `implement-change`
 collapses to when the feature-only steps skip.
 
 The TS sketch below is **the shape**, not the artifact. The shipped v1
-YAML deviates where yak's YAML can't yet express the sketch: `deliver`
-is a `build → integrate` loop (the agent self-corrects via its own test
-runs) with the `review`/`rank` fan-out deferred; `design-review` has no
-confidence auto-skip; feature steps pass state through worktree files
-(`DESIGN.md`), not artifacts, since a skipped step writes no artifact
-for a downstream `needs`. The schemas are inline JSON Schema, not
-`.yak/schemas.ts` refs.
+YAML deviates where yak's YAML can't yet express the sketch:
+
+- `deliver` is linear — `build` (agent, self-corrects via its own test
+  runs and commits) → `verify` (the deterministic `npm test && npm run
+  typecheck && npm run build` gate) → `checkpoint` (a gate that
+  auto-skips when `verify` is green and suspends for a human when red).
+  Not a bounded `loop`: a yak `loop` step's `produces` is a no-op, so a
+  real retry loop would leave `approve-pr` unordered against it
+  ([lchase/yak#35](https://github.com/lchase/yak/issues/35)). The
+  `review`/`rank` fan-out is also deferred.
+- `design-review` has no confidence auto-skip.
+- Feature steps pass state through worktree files (`DESIGN.md`), not
+  artifacts — a skipped step writes no artifact for a downstream
+  `needs`.
+- Schemas are inline JSON Schema, not `.yak/schemas.ts` refs.
+- Artifact names are jexl identifiers (`verifyResult`, not
+  `verify-result` — a hyphen parses as subtraction in a `skipIf`,
+  [lchase/yak#36](https://github.com/lchase/yak/issues/36)).
+
+Validated end to end against `yak-kanban-sandbox` issue 01: `assess`
+(confidence 0.97 → `confirm-scope` skips) → `plan` → `build` (fixes the
+defect, promotes the pin, commits) → `verify` green → `checkpoint` skips
+→ `approve-pr` suspends → resume → PR opened. The one human touch is
+`approve-pr`, by design.
 
 **Why one workflow, not `yak:bug` / `yak:feature` label-routing:** ~70%
 shared structure, and routing is out of scope (§11). The first step
@@ -828,6 +845,14 @@ prerequisite. Filed against yak proper 2026-09-06:
   reason:'cancelled'}`, release the worktree lock). Removes the
   harness's need to track pids and `kill(2)` yak's process directly
   (§9.3).
+- **A `loop` step's `produces` writes an artifact**
+  ([lchase/yak#35](https://github.com/lchase/yak/issues/35)) — would let
+  `implement-change`'s `deliver` be the bounded retry loop the §4.1
+  sketch draws instead of a linear `build → verify → checkpoint`.
+- **Load-time check for hyphenated artifact names in expressions**
+  ([lchase/yak#36](https://github.com/lchase/yak/issues/36)) — jexl
+  silently reads `verify-result` in a `skipIf` as subtraction; a
+  validation error would have saved a debugging cycle authoring §4.1.
 
 ---
 
