@@ -22,6 +22,34 @@ file is maintained by hand until a release-please pipeline lands
   preconditions 1–5 (gh auth, yak on PATH, yakRepoPath git repo,
   Node 22+, write access to `.runs/` + `.harness/`); every check runs,
   each failure reported, any failure exits non-zero.
+- `observe()` — the tick's read phase (`src/observe.ts`, spec §6.2,
+  §5.3): one pass over GitHub issues + comments, `yak pending`, and the
+  `runsDir` journals that returns a fully-typed `Observation` for `plan`
+  to consume with zero further I/O. Pure classifiers + combiners
+  (`classifyRun`, `parseMarkers`, `parseJournal`, `readLabels`,
+  `prStateFrom`, `linkMarkers`, `findOrphans`, `findStaleMarkers`) are
+  each unit-tested directly; `observe()` is thin orchestration over an
+  injectable `ObserveDeps`. Reconstructs the run ↔ issue linkage from
+  marker comments every tick (first-seen wins for `runId → issue`,
+  last-marker for the inverse, distinct run ids = the attempt counter),
+  and records a run id shared by two issues as a `linkageFault`.
+  Classifies each run `alive` / `suspended` / `ok` / `failed` /
+  `stalled` from its journal tail, with `stalled` a pure function of
+  journal mtime (falling back to run-dir mtime) vs `stalledAfterMinutes`.
+  Derives orphans, stale markers (carrying the issue's status), and PR
+  state for `ok` runs. Flags a two-`yak:<status>` issue as a fault;
+  drops `yak:hold` issues from `issues[]` while still counting their
+  markers so a parked-but-running job is not mistaken for an orphan.
+- `realObserveDeps` (`src/observe-deps.ts`) — the sole `gh` / `yak` /
+  filesystem boundary. Guards every `JSON.parse` of external output
+  behind a typed `ObserveError`; boundary-validates `yak pending` with a
+  local zod schema and drops malformed entries; a per-issue comment-read
+  failure faults just that issue instead of aborting the tick; the `ok`
+  PR probe falls back to a `--head` branch lookup (using the marker's
+  recorded branch) before reporting "no PR", so a transient `gh` blip
+  can't route a healthy run to `yak:failed`. Run ids that reach a path
+  (`runIdIsSafe`) and PR URLs that reach `gh` (`prUrlLooksValid`,
+  pinned to `config.repo`) are validated first.
 - Local `zod` re-declarations of the three on-disk yak shapes
   (`src/yak-schemas.ts`, spec §10.1): `GatePendingRequest`, the
   `run.started` / `run.finished` journal events, and `StepFailure` —
@@ -39,3 +67,13 @@ file is maintained by hand until a release-please pipeline lands
 ### Changed
 
 - Config default `workflow` is now `implement-change` (was `fix-defect`).
+- `StepFailureSchema.reason` widened from a 7-value enum to any non-empty
+  string (spec §9.1 — yak owns the failure taxonomy; the harness keys
+  retry off `recoverable`, not its own allowlist). Known values kept as
+  `KNOWN_STEP_FAILURE_REASONS` for reference.
+- `RunFinishedEventSchema.status` widened to any non-empty string so a
+  terminal `run.finished` yak adds later still parses (and classifies as
+  `failed` / needs-human) instead of being silently dropped.
+- New `StepFailedEventSchema` (`t: "step.failed"`) added to
+  `JournalEventSchema` — the third re-declared yak on-disk shape,
+  carrying the validated `StepFailure` behind a `failed` run (spec §9.4).

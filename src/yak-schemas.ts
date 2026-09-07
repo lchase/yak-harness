@@ -38,11 +38,14 @@ export const GatePendingRequestSchema = z
 export type GatePendingRequest = z.infer<typeof GatePendingRequestSchema>;
 
 /**
- * Typed failure reason from yak (yak spec `StepFailure`). Kept as an
- * explicit union so a value yak never documents trips boundary
- * validation; `recoverable` is the field the retry logic reads (spec §9).
+ * The `StepFailure.reason` values yak documents today — kept for
+ * reference and for humane log messages, **not** as a validation gate.
+ * Spec §9.1: yak owns the failure taxonomy ("nine reasons" and growing)
+ * and the harness keys its retry decision off `recoverable`, never off
+ * its own reason allowlist. So {@link StepFailureSchema} accepts any
+ * well-formed `reason` string and a new yak reason parses cleanly.
  */
-export const StepFailureReason = z.enum([
+export const KNOWN_STEP_FAILURE_REASONS = [
   "needs-decision",
   "needs-context",
   "schema-invalid",
@@ -50,11 +53,11 @@ export const StepFailureReason = z.enum([
   "tool-denied",
   "adapter-error",
   "command-failed",
-]);
+] as const;
 
 export const StepFailureSchema = z
   .object({
-    reason: StepFailureReason,
+    reason: z.string().min(1),
     detail: z.string(),
     recoverable: z.boolean(),
   })
@@ -63,10 +66,11 @@ export const StepFailureSchema = z
 export type StepFailure = z.infer<typeof StepFailureSchema>;
 
 // Journal events (yak spec §4.2). Every event carries `{ at, runId }`.
-// The harness only re-declares the two it keys decisions off —
-// `run.started` (linkage capture, spec §5.1) and `run.finished` (run
-// status, spec §6.2) — plus a loose fallback so an unrelated line in the
-// same JSONL file parses without error.
+// The harness re-declares the three it keys decisions off — `run.started`
+// (linkage capture, spec §5.1), `run.finished` (run status, spec §6.2)
+// and `step.failed` (the terminal `StepFailure` behind a `failed` run,
+// spec §9.4) — plus a loose fallback so an unrelated line in the same
+// JSONL file parses without error.
 
 const JournalEventBase = z.object({
   at: IsoTimestamp,
@@ -83,14 +87,39 @@ export const RunStartedEventSchema = JournalEventBase.extend({
 
 export type RunStartedEvent = z.infer<typeof RunStartedEventSchema>;
 
+/**
+ * `status` is left as a free string, not an enum: a `run.finished` the
+ * harness cannot name is still a *terminal* fact it must act on (spec
+ * §6.2), so it has to parse — dropping the line would leave a dead run
+ * classified `alive`. `run.finished` statuses yak documents today are
+ * `ok` / `failed` / `suspended`; {@link RUN_FINISHED_KNOWN_STATUSES}.
+ */
+export const RUN_FINISHED_KNOWN_STATUSES = [
+  "ok",
+  "failed",
+  "suspended",
+] as const;
+
 export const RunFinishedEventSchema = JournalEventBase.extend({
   t: z.literal("run.finished"),
-  status: z.enum(["ok", "failed", "suspended"]),
+  status: z.string().min(1),
 }).passthrough();
 
 export type RunFinishedEvent = z.infer<typeof RunFinishedEventSchema>;
 
-const REDECLARED_EVENT_TYPES = ["run.started", "run.finished"] as const;
+export const StepFailedEventSchema = JournalEventBase.extend({
+  t: z.literal("step.failed"),
+  stepId: z.string().min(1),
+  failure: StepFailureSchema,
+}).passthrough();
+
+export type StepFailedEvent = z.infer<typeof StepFailedEventSchema>;
+
+const REDECLARED_EVENT_TYPES = [
+  "run.started",
+  "run.finished",
+  "step.failed",
+] as const;
 
 /**
  * Any journal line the harness does not re-declare — `t` present, base
@@ -113,6 +142,7 @@ export const OtherJournalEventSchema = JournalEventBase.extend({
 export const JournalEventSchema = z.union([
   RunStartedEventSchema,
   RunFinishedEventSchema,
+  StepFailedEventSchema,
   OtherJournalEventSchema,
 ]);
 

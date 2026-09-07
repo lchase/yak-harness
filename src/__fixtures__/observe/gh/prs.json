@@ -1,0 +1,5 @@
+{
+  "run-ok-pr-open": { "state": "OPEN", "mergedAt": null },
+  "run-ok-pr-merged": { "state": "MERGED", "mergedAt": "2026-09-07T00:00:00Z" },
+  "run-ok-closed": { "state": "CLOSED", "mergedAt": null }
+}
