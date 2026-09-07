@@ -96,7 +96,7 @@ non-zero.
   "qualifyingLabel": "yak",             // default "yak"
   "stalledAfterMinutes": 45,            // required — no safe default
   "maxConcurrent": 2,                   // default 2
-  "workflow": "fix-defect",             // default "fix-defect"
+  "workflow": "implement-change",       // default "implement-change" (see 4.1)
   "inputTemplate": "issueRef={{repo}}#{{number}}"
                                         // {{repo}} {{number}} {{title}} substitution
 }
@@ -108,8 +108,9 @@ non-zero.
 - **`maxConcurrent`** — how many `yak run`s may be in flight at once.
   One launch per tick regardless (§6.2), so an idle harness ramps to
   this cap over several ticks.
-- **`workflow` + `inputTemplate`** — one workflow per deployment.
-  Label-routing to multiple workflows is out of scope for v1.
+- **`workflow` + `inputTemplate`** — one workflow per deployment,
+  `implement-change` by default (§4.1). Label-routing to multiple
+  workflows is out of scope for v1.
 
 **Locked constants** (a `const` in source, not config; each carries a
 `// config candidate if a real need appears` comment):
@@ -132,6 +133,127 @@ to know its own cadence.
 `--config` zod-parses; then: `yakRepoPath` exists and is a git repo,
 `gh auth status` succeeds, `yak --version` runs. Any failure → print
 it, exit non-zero, do nothing partial.
+
+### 4.1 The reference workflow — `implement-change`
+
+`workflow` defaults to **`implement-change`**: one yak workflow covering
+bug / feature / chore. Diagrams and the full decision trail live in
+[`design/workflows/`](design/workflows/) — `implement-change.tldr` is the
+workflow below; `fix-defect.tldr` is yak's own reference workflow
+(yak spec §7), kept as the baseline that `implement-change` collapses to
+when the feature-only steps skip.
+
+**Why one workflow, not `yak:bug` / `yak:feature` label-routing:** ~70%
+shared structure, and routing is out of scope (§11). The first step
+classifies the change; every downstream feature-only step keys its
+`skipIf` off that classification. "Trivial vs substantial" is a spectrum,
+not a bug/feature binary.
+
+```ts
+workflow('implement-change', {
+  input: z.object({ issueRef: z.string() }),
+  steps: [
+    // one agent: classify + locate
+    agent({ id: 'assess', needs: ['input'], produces: 'assessment',
+            tools: ['Read','Grep','Glob'],
+            schema: z.object({
+              kind: z.enum(['bug','feature','chore']),
+              confidence: z.number(),
+              needsDesign: z.boolean(),
+              likelySubtasks: z.number(),
+              needsDocs: z.boolean() }) }),
+
+    gate({ id: 'confirm-scope', needs: ['assessment'], produces: 'scope-decision',
+           schema: z.object({ decision: z.enum(['proceed','narrow','abort']),
+                              notes: z.string().optional() }),
+           skipIf: ({ assessment }) => assessment.confidence > 0.85 }),
+
+    // feature-only ─────────────────────────────
+    agent({ id: 'design', needs: ['assessment'], produces: 'design',
+            schema: DesignSchema,
+            skipIf: ({ assessment }) => !assessment.needsDesign }),
+
+    gate({ id: 'design-review', needs: ['design'], produces: 'design-decision',
+           schema: z.object({ decision: z.enum(['approve','rework']),
+                              notes: z.string().optional() }),
+           skipIf: ({ assessment, design }) =>
+             !assessment.needsDesign || design.confidence > 0.85 }),
+    // ──────────────────────────────────────────
+
+    agent({ id: 'plan', needs: ['assessment'], produces: 'subtasks',
+            schema: z.array(SubtaskSchema) }),   // length 1..N; reads `design` if present
+
+    loop({
+      id: 'deliver',
+      body: [
+        // round 1: map over `subtasks` (worktree per item)
+        // round 2+: single agent addressing `ranked-findings` over the whole diff
+        agent({ id: 'build', needs: ['subtasks'], produces: 'patch',
+                tools: ['Read','Edit','Write','Bash'], context: 'fresh' }),
+
+        command({ id: 'integrate', needs: ['patch'], produces: 'verify-result',
+                  run: 'npm test && npm run typecheck && npm run build',
+                  failOn: 'never', capture: ['exitCode'] }),
+
+        map({ id: 'review', over: 'changed-files', concurrency: 5,
+              produces: 'findings', step: reviewer,
+              skipIf: ({ 'verify-result': v }) => v.exitCode !== 0 }),
+
+        transform({ id: 'rank', needs: ['findings'], produces: 'ranked-findings',
+                    fn: rankAndDedupe,
+                    skipIf: ({ 'verify-result': v }) => v.exitCode !== 0 }),
+      ],
+      until: ({ 'verify-result': v, 'ranked-findings': f }) =>
+               v.exitCode === 0 && f.blocking.length === 0,
+      budget: { maxIterations: 3,
+                noProgress: { signal: f => f.blocking.length, rounds: 2 } },
+      onExhausted: 'suspend',
+    }),
+
+    // feature-only: runs once, after the loop settles
+    agent({ id: 'docs', needs: ['patch'], produces: 'docs-patch',
+            skipIf: ({ assessment }) => !assessment.needsDocs }),
+
+    gate({ id: 'approve-pr', needs: ['ranked-findings','assessment'],
+           produces: 'pr-decision', schema: ApprovalSchema }),
+           // render includes the acceptance criteria + ranked-findings
+
+    command({ id: 'open-pr', needs: ['pr-decision'], produces: 'pr-url',
+              skipIf: ({ 'pr-decision': d }) => d.decision !== 'approve',
+              run: 'gh pr create --fill' }),
+  ],
+})
+```
+
+**Shape.** A linear backbone with two shaped regions: the `deliver`
+**loop** (`build → integrate → review → rank`, ≤3 rounds, `noProgress` 2,
+`onExhausted: suspend`) and the fan-out/fan-in *inside* it — `build` maps
+over subtasks on round 1, `review` maps over changed files, `rank`
+synthesises. yak's static graph is acyclic: review findings feed back to
+`build` **only** through the bounded `loop`, never a back-edge. A
+single-subtask change is not special-cased — `map` over a 1-element list
+runs once.
+
+**Human touchpoints:** `confirm-scope`, `design-review`, `approve-pr` —
+each with a `skipIf`, so a high-confidence bug that needs no design runs
+fully hands-free, and a substantial feature stops three times.
+
+**Constraints the harness depends on:**
+
+1. **Every gate's `answerSchema` is a flat object of scalar / enum
+   properties** (§7) — `confirm-scope`, `design-review`, `approve-pr`
+   comply. `deliver`'s `onExhausted: 'suspend'` writes a
+   `pending/deliver.request.json` the harness bridges exactly like a gate.
+2. **A run that finishes `ok` must have produced a `pr-url` artifact** —
+   unless `open-pr` skipped because `approve-pr` returned non-`approve`.
+   The harness cannot distinguish those two "no PR" cases from the
+   journal, so **both land the issue in `yak:failed`** (§8.2, "`ok` with
+   no PR"). That is the intended home for an aborted PR — the human is
+   already in the loop — but it means `approve-pr` must not be used as a
+   silent "not yet" signal.
+3. **`stalledAfterMinutes` must exceed the longest expected single agent
+   step.** `build`'s round-1 map fans out to `likelySubtasks` agents;
+   size the threshold for the slowest one, not the whole run.
 
 ---
 
@@ -655,7 +777,7 @@ Overlap is the harness's concern (§6.6), not the operator's. A
 | **PR-revision loop** (human requests changes on an open PR, harness resumes the implement loop). | Not part of reaching a first PR unattended. | fresh effort |
 | **Refactoring the yak repo into packages.** | A redraw of yak's architecture with its own tradeoffs; the harness consumes yak through the CLI + on-disk contract regardless of packaging. Building `yak-harness` standalone first gives that later effort a concrete external consumer to design against. | its own wayfinder effort if a monorepo is on the table |
 | **Aggregate observability** — dashboards, cross-run metrics, an alert sink. | The GitHub issues are the record; `.harness/tick.log` is for debugging the harness. | fresh effort |
-| **Label-routing to multiple workflows** (`yak:bug` → `fix-defect`, …). | One workflow per deployment covers v1. | a future ticket |
+| **Label-routing to multiple workflows** (`yak:bug` → `fix-defect`, …). | One workflow per deployment covers v1; `implement-change` (§4.1) already spans bug / feature / chore via `skipIf`. | a future ticket |
 
 ---
 
