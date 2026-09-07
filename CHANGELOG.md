@@ -7,6 +7,16 @@ file is maintained by hand until a release-please pipeline lands
 
 ## [Unreleased]
 
+### Changed
+
+- The set of runs awaiting a human answer is now derived by scanning the
+  on-disk `<runDir>/pending/*.request.json` contract, not by calling
+  `yak pending --json` — yak 0.3.x has no machine-readable `yak pending`,
+  so the old call always failed and no gate was ever surfaced. The
+  `ObserveDeps.yakPending` method is renamed `pendingRuns`;
+  `parsePendingJson` is replaced by `scanPendingRuns` (found driving
+  spec §26 end-to-end).
+
 ### Fixed
 
 - `addLabel` now creates a missing `yak:<status>` label and retries,

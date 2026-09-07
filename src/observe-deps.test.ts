@@ -1,16 +1,19 @@
-import { describe, expect, test } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   branchIsSafe,
   issueLabelSearch,
   ObserveError,
   parseCommentsJson,
   parseIssueListJson,
-  parsePendingJson,
   parsePrListJson,
   parsePrViewJson,
   parseRunBreadcrumb,
   prUrlLooksValid,
   runIdIsSafe,
+  scanPendingRuns,
 } from "./observe-deps.js";
 
 describe("runIdIsSafe", () => {
@@ -149,21 +152,34 @@ describe("parsePrViewJson / parsePrListJson", () => {
   });
 });
 
-describe("parsePendingJson", () => {
+describe("scanPendingRuns", () => {
   const warn = () => {};
+  let runsDir: string;
 
-  test("normalises id/runId and steps/pending aliases", () => {
-    const json = JSON.stringify({
-      runs: [
-        {
-          id: "r1",
-          pending: [
-            { id: "confirm-scope", kind: "gate", rendered: "Proceed?" },
-          ],
-        },
-      ],
+  beforeEach(() => {
+    runsDir = mkdtempSync(join(tmpdir(), "yh-pending-"));
+  });
+  afterEach(() => {
+    rmSync(runsDir, { recursive: true, force: true });
+  });
+
+  const writeRequest = (runId: string, stepId: string, body: unknown): void => {
+    const dir = join(runsDir, runId, "pending");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, `${stepId}.request.json`),
+      typeof body === "string" ? body : JSON.stringify(body),
+    );
+  };
+
+  test("reads one open gate request per run, grouped by run id", () => {
+    writeRequest("r1", "confirm-scope", {
+      kind: "gate",
+      stepId: "confirm-scope",
+      runId: "r1",
+      rendered: "Proceed?",
     });
-    expect(parsePendingJson(json, warn)).toEqual([
+    expect(scanPendingRuns(runsDir, warn)).toEqual([
       {
         runId: "r1",
         steps: [
@@ -173,35 +189,39 @@ describe("parsePendingJson", () => {
     ]);
   });
 
-  test("accepts a bare array too", () => {
-    const json = JSON.stringify([
-      { runId: "r2", steps: [{ stepId: "s", kind: "gate", rendered: "" }] },
-    ]);
-    expect(parsePendingJson(json, warn)).toHaveLength(1);
+  test("a run dir with no pending/ dir contributes nothing", () => {
+    mkdirSync(join(runsDir, "r2"));
+    expect(scanPendingRuns(runsDir, warn)).toEqual([]);
   });
 
-  test("drops an entry missing runId or a step kind, keeps the good ones", () => {
+  test("defaults a missing rendered to the empty string", () => {
+    writeRequest("r3", "s", { kind: "gate", stepId: "s", runId: "r3" });
+    expect(scanPendingRuns(runsDir, warn)[0]?.steps[0]?.rendered).toBe("");
+  });
+
+  test("drops a malformed / unreadable request file loudly, keeps the good ones", () => {
     const dropped: string[] = [];
-    const json = JSON.stringify([
-      { steps: [] },
-      { runId: "r3", steps: [{ stepId: "s" }] },
-      { runId: "r4", steps: [{ stepId: "s", kind: "gate", rendered: "ok" }] },
-    ]);
-    expect(parsePendingJson(json, (m) => dropped.push(m))).toEqual([
-      { runId: "r4", steps: [{ stepId: "s", kind: "gate", rendered: "ok" }] },
+    writeRequest("r4", "bad", "not json");
+    writeRequest("r4", "nokind", { stepId: "nokind", runId: "r4" });
+    writeRequest("r4", "ok", {
+      kind: "gate",
+      stepId: "ok",
+      runId: "r4",
+      rendered: "y",
+    });
+    const out = scanPendingRuns(runsDir, (m) => dropped.push(m));
+    expect(out).toEqual([
+      { runId: "r4", steps: [{ stepId: "ok", kind: "gate", rendered: "y" }] },
     ]);
     expect(dropped).toHaveLength(2);
   });
 
-  test("non-list output → empty, with a warning", () => {
-    const dropped: string[] = [];
-    expect(parsePendingJson('{"nope":true}', (m) => dropped.push(m))).toEqual(
-      [],
-    );
-    expect(dropped).toHaveLength(1);
+  test("a missing runsDir → empty, no throw", () => {
+    expect(scanPendingRuns(join(runsDir, "nope"), warn)).toEqual([]);
   });
 
-  test("non-JSON raises ObserveError", () => {
-    expect(() => parsePendingJson("not json", warn)).toThrow(ObserveError);
+  test("skips an unsafe run-dir name", () => {
+    writeRequest("..", "s", { kind: "gate", stepId: "s", runId: ".." });
+    expect(scanPendingRuns(runsDir, warn)).toEqual([]);
   });
 });

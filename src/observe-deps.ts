@@ -7,9 +7,9 @@
 //   - Every `JSON.parse` of external output is guarded; a garbled `gh` /
 //     `yak` response raises a typed {@link ObserveError} with a readable
 //     cause, never an anonymous `SyntaxError` that aborts the tick blind.
-//   - `yak pending` output is validated against a local zod schema
-//     (CLAUDE.md invariant 2); malformed entries are dropped with a
-//     stderr note, not coerced.
+//   - Each on-disk `pending/*.request.json` gate request is validated
+//     against a local zod schema (CLAUDE.md invariant 2); malformed
+//     entries are dropped with a stderr note, not coerced.
 //   - Run ids that reach a filesystem path are checked (`runIdIsSafe`)
 //     and PR URLs that reach `gh` are checked (`prUrlLooksValid`) so a
 //     value from a marker comment or a run artifact cannot walk the path
@@ -193,57 +193,73 @@ export function parsePrListJson(text: string): RawPr | null {
   return res.success ? (res.data[0] ?? null) : null;
 }
 
-// yak's `yak pending --json` shape is not pinned in a public contract, so
-// tolerate the obvious field-name variants, then validate the normalised
-// result. An entry that still fails is dropped loudly (invariant 2).
-const PendingStepSchema = z.object({
+// The set of runs awaiting a human answer is derived from disk, not from
+// a `yak` subcommand: yak 0.3.x has no machine-readable `yak pending`
+// (the human-text `yak pending` is the only form). The on-disk contract
+// is `<runDir>/pending/<stepId>.request.json` — yak writes one per open
+// gate and removes it once answered (spec §7.1, CLAUDE.md invariant 2).
+const PendingRequestFileSchema = z.object({
   stepId: z.string().min(1),
   kind: z.string().min(1),
-  rendered: z.string(),
-});
-const PendingRunSchema = z.object({
   runId: z.string().min(1),
-  steps: z.array(PendingStepSchema),
+  rendered: z.string().default(""),
 });
 
-/** Parse + boundary-validate `yak pending --json`; drop malformed entries. */
-export function parsePendingJson(
-  text: string,
+/**
+ * Scan `runsDir` for open gate requests: every
+ * `<runId>/pending/*.request.json` that parses and validates. Malformed
+ * files are dropped loudly (invariant 2). Grouped by run id.
+ */
+export function scanPendingRuns(
+  runsDir: string,
   warn: (msg: string) => void = (m) => process.stderr.write(`${m}\n`),
 ): RawPendingRun[] {
-  const parsed = parseJson<unknown>("yak pending", text);
-  const list = Array.isArray(parsed)
-    ? parsed
-    : (parsed as { runs?: unknown }).runs;
-  if (!Array.isArray(list)) {
-    warn("yak-harness: `yak pending` output is not a list — ignoring");
+  let runDirs: string[];
+  try {
+    runDirs = readdirSync(runsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
     return [];
   }
 
   const out: RawPendingRun[] = [];
-  for (const raw of list) {
-    const r = (raw ?? {}) as Record<string, unknown>;
-    const rawSteps = (r.steps ?? r.pending ?? []) as Record<string, unknown>[];
-    const normalised = {
-      runId: r.runId ?? r.id,
-      steps: Array.isArray(rawSteps)
-        ? rawSteps.map((s) => ({
-            stepId: s.stepId ?? s.id,
-            kind: s.kind,
-            rendered: s.rendered ?? "",
-          }))
-        : [],
-    };
-    const res = PendingRunSchema.safeParse(normalised);
-    if (res.success) {
-      out.push(res.data);
-    } else {
-      warn(
-        `yak-harness: dropping malformed \`yak pending\` entry (${
-          res.error.issues[0]?.path.join(".") ?? "?"
-        }: ${res.error.issues[0]?.message ?? "invalid"})`,
+  for (const runId of runDirs) {
+    if (!runIdIsSafe(runId)) continue;
+    const pendingDir = join(runsDir, runId, "pending");
+    let files: string[];
+    try {
+      files = readdirSync(pendingDir).filter((n) =>
+        n.endsWith(".request.json"),
       );
+    } catch {
+      continue; // no pending/ dir — this run has no open gate
     }
+    const steps: RawPendingRun["steps"] = [];
+    for (const file of files) {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(readFileSync(join(pendingDir, file), "utf8"));
+      } catch {
+        warn(`yak-harness: dropping unreadable gate request ${runId}/${file}`);
+        continue;
+      }
+      const res = PendingRequestFileSchema.safeParse(raw);
+      if (!res.success) {
+        warn(
+          `yak-harness: dropping malformed gate request ${runId}/${file} (${
+            res.error.issues[0]?.path.join(".") ?? "?"
+          }: ${res.error.issues[0]?.message ?? "invalid"})`,
+        );
+        continue;
+      }
+      steps.push({
+        stepId: res.data.stepId,
+        kind: res.data.kind,
+        rendered: res.data.rendered,
+      });
+    }
+    if (steps.length > 0) out.push({ runId, steps });
   }
   return out;
 }
@@ -363,10 +379,7 @@ export function realObserveDeps(config: Config): ObserveDeps {
       }
     },
 
-    yakPending: () => {
-      const json = tryRun("yak", ["pending", "--json"], config.yakRepoPath);
-      return json === null ? [] : parsePendingJson(json);
-    },
+    pendingRuns: () => scanPendingRuns(config.runsDir),
 
     listRunDirs: () => {
       try {

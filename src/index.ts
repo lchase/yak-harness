@@ -80,12 +80,12 @@ export {
   issueLabelSearch,
   parseCommentsJson,
   parseIssueListJson,
-  parsePendingJson,
   parsePrListJson,
   parsePrViewJson,
   parseRunBreadcrumb,
   prUrlLooksValid,
   runIdIsSafe,
+  scanPendingRuns,
 } from "./observe-deps.js";
 export {
   type Action,

@@ -27,7 +27,7 @@ function observeOneBacklogIssue(): ObserveDeps {
     listComments: () => [],
     listLaunchBreadcrumbs: () => [],
     listRunBreadcrumbs: () => [],
-    yakPending: () => [],
+    pendingRuns: () => [],
     listRunDirs: () => [],
     readRun: () => ({ journal: null, mtimeMs: null }),
     readGateRequest: () => null,
