@@ -70,7 +70,10 @@ export function realApplyDeps(config: Config): ApplyDeps {
 
     readJournal: (runId) => {
       try {
-        return readFileSync(join(config.runsDir, runId, "journal"), "utf8");
+        return readFileSync(
+          join(config.runsDir, runId, "journal.jsonl"),
+          "utf8",
+        );
       } catch {
         return null;
       }

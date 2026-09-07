@@ -9,6 +9,10 @@ file is maintained by hand until a release-please pipeline lands
 
 ### Fixed
 
+- Read yak's run journal from `<runDir>/journal.jsonl`, its real
+  filename, instead of `<runDir>/journal` — the latter always `ENOENT`d,
+  so every real launch aborted with "journal has no run.started first
+  event" (found driving spec §26 end-to-end).
 - CLI entry guard now resolves symlinks before comparing `argv[1]` to
   the module path, so `yak-harness` invoked through npm's `bin` shim (or
   `npm link`) actually runs instead of silently exiting 0 (found driving

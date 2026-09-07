@@ -102,7 +102,7 @@ function fixtureDeps(
     readRun: (id) => {
       let journal: string | null = null;
       try {
-        journal = readFileSync(join(RUNS_DIR, id, "journal"), "utf8");
+        journal = readFileSync(join(RUNS_DIR, id, "journal.jsonl"), "utf8");
       } catch {
         journal = null;
       }

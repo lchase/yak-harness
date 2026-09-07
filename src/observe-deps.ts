@@ -291,7 +291,8 @@ function readPrUrlArtifact(runsDir: string, runId: string): string | null {
 
 /** Production {@link ObserveDeps} — shells out to `gh` and `yak` (spec §10.1). */
 export function realObserveDeps(config: Config): ObserveDeps {
-  const journalPath = (runId: string) => join(config.runsDir, runId, "journal");
+  const journalPath = (runId: string) =>
+    join(config.runsDir, runId, "journal.jsonl");
 
   const ghPrView = (url: string): RawPr | null => {
     const json = tryRun("gh", [
