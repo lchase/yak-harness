@@ -1,0 +1,3 @@
+{"t":"run.started","at":"2026-09-06T09:12:44Z","runId":"run-suspended","workflow":"implement-change","inputHash":"h2","adapter":"claude","isolation":"worktree"}
+{"t":"step.started","at":"2026-09-06T09:13:00Z","runId":"run-suspended","stepId":"confirm-scope"}
+{"t":"run.finished","at":"2026-09-06T09:14:00Z","runId":"run-suspended","status":"suspended"}

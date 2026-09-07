@@ -1,0 +1,18 @@
+[
+  {
+    "runId": "run-suspended",
+    "steps": [
+      {
+        "stepId": "confirm-scope",
+        "kind": "gate",
+        "rendered": "Triage thinks this is a bug in the retry backoff (confidence 0.71).\nProceed with this scope, narrow it, or abort?"
+      }
+    ]
+  },
+  {
+    "runId": "run-ghost",
+    "steps": [
+      { "stepId": "approve-pr", "kind": "gate", "rendered": "Approve opening the PR?" }
+    ]
+  }
+]

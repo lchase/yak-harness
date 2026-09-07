@@ -1,0 +1,2 @@
+{"t":"run.started","at":"2026-09-06T09:12:44Z","runId":"run-ok-no-pr","workflow":"implement-change","inputHash":"h5","adapter":"claude","isolation":"worktree"}
+{"t":"run.finished","at":"2026-09-06T10:00:00Z","runId":"run-ok-no-pr","status":"ok"}

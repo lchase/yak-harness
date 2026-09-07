@@ -4,6 +4,7 @@ import {
   JournalEventSchema,
   RunFinishedEventSchema,
   RunStartedEventSchema,
+  StepFailedEventSchema,
   StepFailureSchema,
 } from "./yak-schemas.js";
 
@@ -51,10 +52,15 @@ test("StepFailure round-trips reason/detail/recoverable", () => {
   expect(f.recoverable).toBe(true);
 });
 
-test("StepFailure rejects an undocumented reason and a non-boolean recoverable", () => {
+test("StepFailure accepts an unknown-but-well-formed reason (spec §9.1 — yak owns the taxonomy)", () => {
   expect(
-    StepFailureSchema.safeParse({ reason: "vibes", detail: "x", recoverable: true })
-      .success,
+    StepFailureSchema.parse({ reason: "quota-exceeded", detail: "x", recoverable: true }),
+  ).toMatchObject({ reason: "quota-exceeded", recoverable: true });
+});
+
+test("StepFailure still rejects a missing reason and a non-boolean recoverable", () => {
+  expect(
+    StepFailureSchema.safeParse({ detail: "x", recoverable: true }).success,
   ).toBe(false);
   expect(
     StepFailureSchema.safeParse({
@@ -92,8 +98,8 @@ test("run.started rejects a missing inputHash", () => {
   ).toBe(false);
 });
 
-test("run.finished parses each valid status and rejects others", () => {
-  for (const status of ["ok", "failed", "suspended"]) {
+test("run.finished parses documented and undocumented statuses alike (a terminal event must not be dropped)", () => {
+  for (const status of ["ok", "failed", "suspended", "cancelled"]) {
     expect(
       RunFinishedEventSchema.parse({
         t: "run.finished",
@@ -108,8 +114,24 @@ test("run.finished parses each valid status and rejects others", () => {
       t: "run.finished",
       at: "2026-08-08T15:00:00Z",
       runId: "r1",
-      status: "cancelled",
+      status: "",
     }).success,
+  ).toBe(false);
+});
+
+test("step.failed carries a validated StepFailure and rides the union", () => {
+  const ev = {
+    t: "step.failed",
+    at: "2026-08-08T15:00:00Z",
+    runId: "r1",
+    stepId: "build",
+    failure: { reason: "command-failed", detail: "exit 1", recoverable: true },
+  };
+  expect(StepFailedEventSchema.parse(ev).failure.recoverable).toBe(true);
+  expect(JournalEventSchema.parse(ev)).toMatchObject({ t: "step.failed" });
+  // a step.failed with a malformed failure fails loudly, not silently opaque
+  expect(
+    JournalEventSchema.safeParse({ ...ev, failure: { reason: "x" } }).success,
   ).toBe(false);
 });
 

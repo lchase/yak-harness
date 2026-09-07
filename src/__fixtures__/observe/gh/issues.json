@@ -1,0 +1,15 @@
+[
+  { "number": 10, "title": "Add a retry cap", "labels": [{ "name": "yak" }] },
+  { "number": 11, "title": "Fix the backoff", "labels": [{ "name": "yak" }, { "name": "yak:running" }] },
+  { "number": 12, "title": "Design the importer", "labels": [{ "name": "yak" }, { "name": "yak:waiting" }] },
+  { "number": 13, "title": "Rename the module", "labels": [{ "name": "yak" }, { "name": "yak:pr-open" }] },
+  { "number": 14, "title": "Box was replaced", "labels": [{ "name": "yak" }, { "name": "yak:running" }] },
+  { "number": 15, "title": "Two status labels", "labels": [{ "name": "yak" }, { "name": "yak:running" }, { "name": "yak:pr-open" }] },
+  { "number": 16, "title": "Parked by a human", "labels": [{ "name": "yak" }, { "name": "yak:hold" }, { "name": "yak:running" }] },
+  { "number": 17, "title": "Retried once", "labels": [{ "name": "yak" }, { "name": "yak:running" }] },
+  { "number": 18, "title": "Wedged run", "labels": [{ "name": "yak" }, { "name": "yak:running" }] },
+  { "number": 19, "title": "Marker quoted in a reply", "labels": [{ "name": "yak" }, { "name": "yak:running" }] },
+  { "number": 20, "title": "Shared run A", "labels": [{ "name": "yak" }, { "name": "yak:running" }] },
+  { "number": 21, "title": "Shared run B", "labels": [{ "name": "yak" }, { "name": "yak:running" }] },
+  { "number": 22, "title": "Closed PR unmerged", "labels": [{ "name": "yak" }, { "name": "yak:pr-open" }] }
+]

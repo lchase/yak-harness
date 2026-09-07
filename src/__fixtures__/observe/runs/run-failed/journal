@@ -1,0 +1,4 @@
+{"t":"run.started","at":"2026-09-06T09:12:44Z","runId":"run-failed","workflow":"implement-change","inputHash":"h6","adapter":"claude","isolation":"worktree"}
+{"t":"step.started","at":"2026-09-06T09:20:00Z","runId":"run-failed","stepId":"build"}
+{"t":"step.failed","at":"2026-09-06T09:40:00Z","runId":"run-failed","stepId":"build","failure":{"reason":"command-failed","detail":"npm test exited 1","recoverable":true}}
+{"t":"run.finished","at":"2026-09-06T09:40:01Z","runId":"run-failed","status":"failed"}
