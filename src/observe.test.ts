@@ -74,6 +74,7 @@ function fixtureDeps(
         labels: i.labels.map((l) => l.name),
       })),
     listComments: (n) => comments[String(n)] ?? [],
+    listLaunchBreadcrumbs: () => [],
     yakPending: () => pending,
     listRunDirs: () =>
       readdirSync(RUNS_DIR, { withFileTypes: true })

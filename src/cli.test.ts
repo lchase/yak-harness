@@ -46,18 +46,22 @@ test("doctor with an invalid config → ConfigError on stderr, exit 1", () => {
   expect(c.err.join("\n")).toContain("stalledAfterMinutes");
 });
 
-test("tick is not implemented yet → exit 1", () => {
+test("tick with a valid config runs observe → plan (no gh here) and no longer reports 'not implemented'", () => {
   const dir = mkdtempSync(join(tmpdir(), "yh-cli-"));
   const path = join(dir, "ok.json");
   writeFileSync(
     path,
     JSON.stringify({
       repo: "lchase/yak",
-      yakRepoPath: "/srv/yak",
+      yakRepoPath: dir,
+      runsDir: join(dir, ".runs"),
       stalledAfterMinutes: 45,
     }),
   );
   const c = capture();
-  expect(cli(["tick", "--config", path], c.io)).toBe(1);
-  expect(c.err.join("\n")).toContain("not implemented");
+  // No `gh` issues match (empty repo view) / `gh` may be absent — either
+  // way the command is wired: it must not claim to be unimplemented.
+  const code = cli(["tick", "--config", path, "--dry-run"], c.io);
+  expect([0, 1]).toContain(code);
+  expect([...c.out, ...c.err].join("\n")).not.toContain("not implemented");
 });

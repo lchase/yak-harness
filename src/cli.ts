@@ -7,8 +7,11 @@
 
 import { argv } from "node:process";
 import { fileURLToPath } from "node:url";
+import { realApplyDeps } from "./apply.js";
 import { ConfigError, loadConfig } from "./config.js";
 import { formatReport, runDoctor } from "./doctor.js";
+import { ObserveError, realObserveDeps } from "./observe.js";
+import { runTick } from "./tick.js";
 
 const USAGE = "usage: yak-harness <tick|doctor> --config <path> [--dry-run]";
 
@@ -51,7 +54,7 @@ interface CliIo {
 /** Run one CLI invocation. Returns the process exit code; performs no `process.exit`. */
 export function cli(argv: string[], io: CliIo): number {
   try {
-    const { command, configPath } = parseArgs(argv);
+    const { command, configPath, dryRun } = parseArgs(argv);
 
     if (command !== "tick" && command !== "doctor") {
       throw new CliExit(2, USAGE);
@@ -74,7 +77,19 @@ export function cli(argv: string[], io: CliIo): number {
       return report.ok ? 0 : 1;
     }
 
-    throw new CliExit(1, 'yak-harness: "tick" not implemented yet');
+    try {
+      return runTick(
+        config,
+        {
+          observe: realObserveDeps(config),
+          apply: realApplyDeps(config),
+        },
+        { io, dryRun },
+      );
+    } catch (err) {
+      if (err instanceof ObserveError) throw new CliExit(1, err.message);
+      throw err;
+    }
   } catch (err) {
     if (err instanceof CliExit) {
       io.err(err.message);

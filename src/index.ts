@@ -62,6 +62,17 @@ export {
   type FlagOrphanAction,
 } from "./plan.js";
 export {
+  apply,
+  realApplyDeps,
+  renderInput,
+  branchForRun,
+  ApplyError,
+  type ApplyDeps,
+  type ApplyResult,
+  type SpawnedRun,
+} from "./apply.js";
+export { runTick, describeAction, type TickDeps, type TickOptions, type TickIo } from "./tick.js";
+export {
   runIdIsSafe,
   branchIsSafe,
   prUrlLooksValid,
