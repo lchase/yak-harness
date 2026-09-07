@@ -55,7 +55,15 @@ const comment = (body: string, assoc = "NONE"): RawComment => ({
  * `mtimeOverrides` feeds the `stalled` classifier a deterministic age.
  */
 function fixtureDeps(
-  opts: { now?: Date; mtimeOverrides?: Record<string, number> } = {},
+  opts: {
+    now?: Date;
+    mtimeOverrides?: Record<string, number>;
+    runBreadcrumbs?: {
+      runId: string;
+      issue: number;
+      launchedAt: string;
+    }[];
+  } = {},
 ): ObserveDeps {
   const now = opts.now ?? NOW;
   const freshMtime = now.getTime() - 60_000;
@@ -83,6 +91,7 @@ function fixtureDeps(
       })),
     listComments: (n) => comments[String(n)] ?? [],
     listLaunchBreadcrumbs: () => [],
+    listRunBreadcrumbs: () => opts.runBreadcrumbs ?? [],
     yakPending: () => pending,
     listRunDirs: () =>
       readdirSync(RUNS_DIR, { withFileTypes: true })
@@ -374,11 +383,25 @@ describe("findOrphans", () => {
       new Set(["a", "s", "k", "f", "m"]),
     );
     expect(orphans).toEqual([
-      { runId: "a", class: "alive", live: true },
-      { runId: "s", class: "stalled", live: true },
-      { runId: "k", class: "ok", live: false },
-      { runId: "f", class: "failed", live: false },
+      { runId: "a", class: "alive", live: true, recovery: null },
+      { runId: "s", class: "stalled", live: true, recovery: null },
+      { runId: "k", class: "ok", live: false, recovery: null },
+      { runId: "f", class: "failed", live: false, recovery: null },
     ]);
+  });
+
+  test("a run with a recovery breadcrumb carries the issue + launch time", () => {
+    const orphans = findOrphans(
+      [run("a", "alive")],
+      [],
+      new Set(),
+      new Set(["a"]),
+      new Map([["a", { issue: 42, launchedAt: "2026-09-06T09:00:00Z" }]]),
+    );
+    expect(orphans[0]?.recovery).toEqual({
+      issue: 42,
+      launchedAt: "2026-09-06T09:00:00Z",
+    });
   });
 
   test("a pending entry with no marker and no run dir → pending-only orphan", () => {
@@ -389,7 +412,7 @@ describe("findOrphans", () => {
       new Set(),
     );
     expect(orphans).toEqual([
-      { runId: "ghost", class: "pending-only", live: true },
+      { runId: "ghost", class: "pending-only", live: true, recovery: null },
     ]);
   });
 
@@ -537,13 +560,58 @@ describe("observe", () => {
       runId: "run-orphan",
       class: "alive",
       live: true,
+      recovery: null,
     });
     expect(byId["run-ghost"]).toEqual({
       runId: "run-ghost",
       class: "pending-only",
       live: true,
+      recovery: null,
     });
     expect(byId["run-alive"]).toBeUndefined();
+  });
+
+  test("a run breadcrumb re-links an orphan for recovery (spec §5.5)", () => {
+    const recovered = observe(
+      CONFIG,
+      fixtureDeps({
+        runBreadcrumbs: [
+          {
+            runId: "run-orphan",
+            issue: 99,
+            launchedAt: "2026-09-06T08:00:00Z",
+          },
+        ],
+      }),
+    );
+    expect(
+      recovered.orphans.find((o) => o.runId === "run-orphan")?.recovery,
+    ).toEqual({ issue: 99, launchedAt: "2026-09-06T08:00:00Z" });
+  });
+
+  test("once the recovery marker is reposted, the run is no longer an orphan (E is idempotent)", () => {
+    // Simulates the tick *after* `apply` reposted the lost marker for
+    // `run-orphan` onto issue #10: the marker now links the run, so this
+    // observation must not re-flag it or re-plan E (spec §5.5, criterion 5).
+    const base = fixtureDeps();
+    const afterRecovery = observe(CONFIG, {
+      ...base,
+      listComments: (n) =>
+        n === 10
+          ? [
+              {
+                body: "🐂 yak run started: `run-orphan`\n<!-- yak-harness run=run-orphan branch=yak/run-orphan launched=2026-09-06T08:00:00Z -->",
+                authorAssociation: "NONE",
+                createdAt: "",
+              },
+            ]
+          : (base.listComments(n) ?? []),
+    });
+
+    expect(
+      afterRecovery.orphans.find((o) => o.runId === "run-orphan"),
+    ).toBeUndefined();
+    expect(afterRecovery.runToIssue["run-orphan"]).toBe(10);
   });
 
   test("stale: issue #14's marker points at a run with no .runs/ dir", () => {

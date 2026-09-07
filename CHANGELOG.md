@@ -63,6 +63,19 @@ file is maintained by hand until a release-please pipeline lands
   add new — both idempotent). A/B and the §9.4 escalation comment are
   recorded as `skipped`, not dropped. At most one launch per tick; an
   `ApplyError` aborts the remaining actions and leaves state for a human.
+- `apply` action **E** — orphan + stale-marker flagging (`src/apply.ts`,
+  spec §5.5, §6.3). A `.harness/runs/<run-id>.json` breadcrumb naming
+  the issue re-links an orphan run: `apply` reposts the lost marker
+  comment (`branch` = deterministic `yak/<runId>`), so it is no longer
+  an orphan next tick — the only sanctioned re-link, never a guess. A
+  live orphan with no breadcrumb is logged loudly (`errors`) and, per
+  `plan`, counted against the cap and left to wedge new launches until a
+  human clears it. An already-terminal (`ok` / `failed`) orphan gets one
+  `notes` line and the tick carries on. `observe` gains
+  `ObserveDeps.listRunBreadcrumbs()` and `parseRunBreadcrumb`; `Orphan`
+  and `FlagOrphanAction` carry a `recovery` field; `ApplyResult` gains a
+  non-load-bearing `notes` channel. The §9.4 escalation comment on a
+  relabel into `yak:failed` stays deferred to the failure/retry work.
 - `realApplyDeps` (`src/apply-deps.ts`) — the write-side `gh` / `yak` /
   filesystem boundary: detached `spawn` + `unref`, idempotent `gh issue
   edit` label ops (absent-label removal swallowed), JSON breadcrumbs

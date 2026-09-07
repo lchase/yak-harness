@@ -244,25 +244,78 @@ describe("apply — relabel (C)", () => {
   });
 });
 
-// ── pass-through ────────────────────────────────────────────────────
+// ── E: orphan / stale-marker flagging (spec §5.5) ───────────────────
 
-test("unhandled action kinds are recorded as skipped, not dropped", () => {
-  const { deps } = fake();
-  const result = apply(
-    [
-      {
-        kind: "flag-orphan",
-        runId: "x",
-        orphanClass: "alive",
-        live: true,
-        guard: { notAlreadyFlagged: true },
-      },
-    ],
-    CONFIG,
-    deps,
-  );
-  expect(result.aborted).toBe(false);
-  expect(result.skipped[0]).toMatch(/flag-orphan x/);
+describe("apply — flag-orphan (E)", () => {
+  const orphan = (o: Partial<Action> & { runId: string }): Action =>
+    ({
+      kind: "flag-orphan",
+      orphanClass: "alive",
+      live: true,
+      recovery: null,
+      guard: { notAlreadyFlagged: true },
+      ...o,
+    }) as Action;
+
+  test("recoverable → reposts the lost marker to the breadcrumb's issue", () => {
+    const { deps, calls } = fake();
+    const result = apply(
+      [
+        orphan({
+          runId: "run-x",
+          recovery: { issue: 8, launchedAt: "2026-09-06T09:00:00Z" },
+        }),
+      ],
+      CONFIG,
+      deps,
+    );
+    expect(result.aborted).toBe(false);
+    expect(result.errors).toEqual([]);
+    expect(calls).toEqual([
+      "comment #8 :: <!-- yak-harness run=run-x branch=yak/run-x launched=2026-09-06T09:00:00Z -->",
+    ]);
+    expect(result.applied[0]).toMatch(/recovered orphan run run-x → #8/);
+  });
+
+  test("live + not recoverable → loud error, no side effect, not aborted", () => {
+    const { deps, calls } = fake();
+    const result = apply(
+      [orphan({ runId: "run-x", orphanClass: "alive", live: true })],
+      CONFIG,
+      deps,
+    );
+    expect(result.aborted).toBe(false);
+    expect(calls).toEqual([]);
+    expect(result.errors[0]).toMatch(/LIVE ORPHAN run=run-x/);
+  });
+
+  test("already-terminal orphan → one note, tick carries on", () => {
+    const { deps, calls } = fake();
+    const result = apply(
+      [orphan({ runId: "run-x", orphanClass: "failed", live: false })],
+      CONFIG,
+      deps,
+    );
+    expect(calls).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.notes[0]).toMatch(/orphan run run-x \(failed\).*ignoring/);
+  });
+
+  test("recovery breadcrumb with a path-unsafe run id → error, no comment", () => {
+    const { deps, calls } = fake();
+    const result = apply(
+      [
+        orphan({
+          runId: "../evil",
+          recovery: { issue: 8, launchedAt: "2026-09-06T09:00:00Z" },
+        }),
+      ],
+      CONFIG,
+      deps,
+    );
+    expect(calls).toEqual([]);
+    expect(result.errors[0]).toMatch(/unsafe run id/);
+  });
 });
 
 test("branchForRun is the deterministic worktree branch", () => {

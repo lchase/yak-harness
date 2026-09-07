@@ -51,6 +51,7 @@ export {
   type RawIssue,
   type RawPendingRun,
   type RawPr,
+  type RunBreadcrumb,
   type RunClass,
   type RunMarker,
   type RunObservation,
@@ -66,6 +67,7 @@ export {
   parsePendingJson,
   parsePrListJson,
   parsePrViewJson,
+  parseRunBreadcrumb,
   prUrlLooksValid,
   runIdIsSafe,
 } from "./observe-deps.js";
