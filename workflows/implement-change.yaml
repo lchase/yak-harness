@@ -1,0 +1,238 @@
+# implement-change — the harness reference workflow (yak-harness spec §4.1).
+#
+# One workflow spanning bug / feature / chore. `assess` classifies the
+# change; the feature-only steps (design, design-review, docs) self-skip
+# off that classification. Self-contained: inline schemas, inline
+# prompts, no `.yak/` directory — it ships with the harness and runs
+# against any repo yak is pointed at.
+#
+# v1 deviations from the §4.1 sketch (tracked for a follow-up):
+#   - `deliver` is a `build -> integrate` loop; the agent self-corrects
+#     via its own test runs. The `review` (map) + `rank` (transform)
+#     fan-out is not here yet.
+#   - `design-review` has no confidence auto-skip — a human reviews
+#     every design.
+#   - feature steps pass state through worktree files (DESIGN.md), not
+#     artifacts, because a skipped step writes no artifact for a
+#     downstream `needs` to read.
+
+name: implement-change
+version: "1"
+
+inputSchema:
+  inline:
+    type: object
+    properties:
+      issueRef: { type: string }
+    required: [issueRef]
+
+steps:
+  - id: assess
+    needs: [input]
+    agent:
+      prompt:
+        inline: |
+          Triage GitHub issue {{input.issueRef}} for an automated
+          implementation run.
+
+          Run `gh issue view {{input.issueRef}}` to read the issue, then
+          read enough of the codebase to classify the change. Emit:
+
+          - kind: bug | feature | chore
+          - confidence: 0..1 — how sure you are that the issue is
+            well-scoped AND you know exactly where the change goes. Use a
+            value below 0.85 whenever the issue asks you to investigate,
+            hints the obvious fix may be incomplete, or the blast radius
+            is unclear. A localized, pinned bug is ~0.95.
+          - needsDesign: true only if there is a real design decision — a
+            new module, a data-model or persistence choice, an API shape.
+            Almost always false for bug fixes and chores.
+          - likelySubtasks: rough count of independent edits (1 for a
+            localized change).
+          - needsDocs: true if user-facing docs (README, etc.) must
+            change.
+          - summary: one paragraph — what the change is and where it goes.
+      schema:
+        inline:
+          type: object
+          properties:
+            kind: { type: string, enum: [bug, feature, chore] }
+            confidence: { type: number }
+            needsDesign: { type: boolean }
+            likelySubtasks: { type: integer }
+            needsDocs: { type: boolean }
+            summary: { type: string }
+          required: [kind, confidence, needsDesign, likelySubtasks, needsDocs, summary]
+      tools: [Read, Grep, Glob, Bash]
+    produces: assessment
+
+  - id: confirm-scope
+    needs: [assessment, input]
+    skipIf: "assessment.confidence > 0.85"
+    gate:
+      schema:
+        inline:
+          type: object
+          properties:
+            decision: { type: string, enum: [proceed, narrow, abort], default: proceed }
+            notes: { type: string, default: "" }
+          required: [decision]
+      render:
+        inline: |
+          **{{input.issueRef}}** — {{assessment.summary}}
+
+          kind: {{assessment.kind}} · confidence: {{assessment.confidence}}
+          needsDesign: {{assessment.needsDesign}} · likelySubtasks: {{assessment.likelySubtasks}}
+
+          Confidence is below the auto-proceed threshold. Confirm scope:
+
+          - decision: proceed | narrow | abort
+          - notes: guidance for the run (required when narrowing)
+    produces: scope-decision
+
+  - id: design
+    needs: [assessment]
+    skipIf: "!assessment.needsDesign"
+    agent:
+      prompt:
+        inline: |
+          {{assessment.summary}}
+
+          This change has a design decision to make. Read the relevant
+          code and write `DESIGN.md` at the repo root: the options, the
+          choice, and the reason, in under a page. Do NOT implement
+          anything yet.
+      schema:
+        inline:
+          type: object
+          properties:
+            summary: { type: string }
+          required: [summary]
+      tools: [Read, Grep, Glob, Write]
+    produces: design
+
+  - id: design-review
+    needs: [assessment, input]
+    skipIf: "!assessment.needsDesign"
+    gate:
+      schema:
+        inline:
+          type: object
+          properties:
+            decision: { type: string, enum: [approve, rework], default: approve }
+            notes: { type: string, default: "" }
+          required: [decision]
+      render:
+        inline: |
+          A design for **{{input.issueRef}}** ({{assessment.summary}}) was
+          written to `DESIGN.md` on the run branch. Review it.
+
+          - decision: approve | rework
+          - notes: what to change (required when reworking)
+    produces: design-decision
+
+  - id: plan
+    needs: [assessment, input]
+    agent:
+      prompt:
+        inline: |
+          Plan the implementation of {{input.issueRef}} — {{assessment.summary}}
+
+          If `DESIGN.md` exists at the repo root, follow it. Produce an
+          ordered checklist of the concrete edits. Do NOT implement.
+      schema:
+        inline:
+          type: object
+          properties:
+            steps: { type: array, items: { type: string } }
+          required: [steps]
+      tools: [Read, Grep, Glob]
+    produces: plan
+
+  - id: deliver
+    needs: [plan, input]
+    loop:
+      until: "verify.exitCode == 0"
+      budget:
+        maxIterations: 3
+        noProgress:
+          signal: "verify.exitCode"
+          rounds: 2
+      onExhausted: suspend
+      body:
+        - id: build
+          needs: [plan, input]
+          agent:
+            prompt:
+              inline: |
+                Implement {{input.issueRef}} in the working tree, following
+                this plan:
+
+                {{plan.steps}}
+
+                If `DESIGN.md` exists at the repo root, follow it.
+
+                Then run `npm test`, `npm run typecheck` and `npm run
+                build` yourself and fix everything red before you finish —
+                a separate check re-runs all three and the run does not
+                progress until they pass. If a previous attempt left
+                failures, diagnose and fix them; do not start over.
+            tools: [Read, Grep, Glob, Edit, Write, Bash]
+          produces: build-note
+
+        - id: verify
+          needs: [build-note]
+          command:
+            run: "npm test && npm run typecheck && npm run build"
+            failOn: never
+            capture: [exitCode]
+          produces: verify
+
+  - id: docs
+    needs: [assessment, input]
+    skipIf: "!assessment.needsDocs"
+    agent:
+      prompt:
+        inline: |
+          The code change for {{input.issueRef}} ({{assessment.summary}})
+          is already implemented in the working tree. Update the
+          user-facing docs (README and similar) to match.
+      schema:
+        inline:
+          type: object
+          properties:
+            summary: { type: string }
+          required: [summary]
+      tools: [Read, Grep, Glob, Edit, Write]
+    produces: docs-note
+
+  - id: approve-pr
+    needs: [assessment, input]
+    gate:
+      # render references {{input.issueRef}} and {{assessment.summary}}
+      schema:
+        inline:
+          type: object
+          properties:
+            decision: { type: string, enum: [approve, reject], default: approve }
+            notes: { type: string, default: "" }
+          required: [decision]
+      render:
+        inline: |
+          **{{input.issueRef}}** — {{assessment.summary}}
+
+          The implementation is complete and `npm test`, `npm run
+          typecheck` and `npm run build` all pass on the run branch.
+          Review the diff.
+
+          - decision: approve | reject
+          - notes: reason for rejecting (required when rejecting)
+    produces: pr-decision
+
+  - id: open-pr
+    needs: [pr-decision]
+    skipIf: "pr-decision.decision != 'approve'"
+    command:
+      run: 'git push -u origin HEAD && gh pr create --fill'
+      capture: [stdout, stderr, exitCode]
+    produces: pr-url

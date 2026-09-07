@@ -11,7 +11,8 @@
     "yak-harness": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "workflows"
   ],
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",

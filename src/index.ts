@@ -117,6 +117,11 @@ export {
   transition,
 } from "./transition.js";
 export {
+  BUNDLED_WORKFLOWS_DIR,
+  resolveWorkflowPath,
+  WorkflowResolutionError,
+} from "./workflow-path.js";
+export {
   type GatePendingRequest,
   GatePendingRequestSchema,
   type JournalEvent,

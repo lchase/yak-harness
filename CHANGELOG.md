@@ -9,6 +9,23 @@ file is maintained by hand until a release-please pipeline lands
 
 ### Added
 
+- `implement-change` workflow (`workflows/implement-change.yaml`, spec
+  §4.1) — the runnable yak artifact the harness launches per issue. One
+  workflow over bug / feature / chore: `assess` classifies the change,
+  `confirm-scope` gates when confidence ≤ 0.85, the feature-only steps
+  (`design`, `design-review`, `docs`) self-skip off the classification, a
+  bounded `deliver` loop (`build → verify`, ≤ 3 rounds, `noProgress` 2,
+  `onExhausted: suspend`) drives the change green, `approve-pr` gates the
+  PR. Self-contained: inline JSON-Schema, inline prompts, no `.yak/`
+  directory — ships with the harness. v1 deviations from the §4.1 sketch
+  (review/rank fan-out, design confidence auto-skip, artifact-passed
+  feature state) are noted in the spec for a follow-up.
+- `resolveWorkflowPath` (`src/workflow-path.ts`) — `apply` resolves
+  `config.workflow` (a bare name) to the bundled
+  `workflows/<name>.yaml`; a value containing a path separator or a
+  `.yaml`/`.yml` extension is used directly (resolved against
+  `yakRepoPath` when relative). `package.json` `files` now ships
+  `workflows/`.
 - Repo scaffold: TypeScript + ESM + Node 22 toolchain, `tsup` build,
   `vitest`, `zod` + `ajv` dependencies, `CLAUDE.md` invariants.
 - Config schema (`src/config.ts`, spec §4): `zod`-parsed JSON, strict

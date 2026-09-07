@@ -137,11 +137,24 @@ it, exit non-zero, do nothing partial.
 ### 4.1 The reference workflow — `implement-change`
 
 `workflow` defaults to **`implement-change`**: one yak workflow covering
-bug / feature / chore. Diagrams and the full decision trail live in
-[`design/workflows/`](design/workflows/) — `implement-change.tldr` is the
-workflow below; `fix-defect.tldr` is yak's own reference workflow
-(yak spec §7), kept as the baseline that `implement-change` collapses to
-when the feature-only steps skip.
+bug / feature / chore. The runnable artifact is
+[`workflows/implement-change.yaml`](../workflows/implement-change.yaml),
+bundled with the harness — `apply` resolves the bare name to that path
+(`src/workflow-path.ts`); a value that looks like a path is used
+directly, resolved against `yakRepoPath`, for a repo that ships its own.
+Diagrams and the decision trail live in
+[`design/workflows/`](design/workflows/) — `fix-defect.tldr` is yak's
+own reference workflow (yak spec §7), the baseline `implement-change`
+collapses to when the feature-only steps skip.
+
+The TS sketch below is **the shape**, not the artifact. The shipped v1
+YAML deviates where yak's YAML can't yet express the sketch: `deliver`
+is a `build → integrate` loop (the agent self-corrects via its own test
+runs) with the `review`/`rank` fan-out deferred; `design-review` has no
+confidence auto-skip; feature steps pass state through worktree files
+(`DESIGN.md`), not artifacts, since a skipped step writes no artifact
+for a downstream `needs`. The schemas are inline JSON Schema, not
+`.yak/schemas.ts` refs.
 
 **Why one workflow, not `yak:bug` / `yak:feature` label-routing:** ~70%
 shared structure, and routing is out of scope (§11). The first step

@@ -23,6 +23,7 @@ import type { ApplyDeps, SpawnedRun } from "./apply.js";
 import type { Config } from "./config.js";
 import { harnessRunsDir } from "./constants.js";
 import { runIdIsSafe } from "./observe-deps.js";
+import { resolveWorkflowPath } from "./workflow-path.js";
 
 const MAX_BUFFER = 8 * 1024 * 1024;
 
@@ -54,9 +55,10 @@ export function realApplyDeps(config: Config): ApplyDeps {
     },
 
     spawnRun: ({ workflow, input }): SpawnedRun => {
+      const workflowPath = resolveWorkflowPath(workflow, config.yakRepoPath);
       const child = spawn(
         "yak",
-        ["run", workflow, "--isolation", "worktree", "--input", input],
+        ["run", workflowPath, "--isolation", "worktree", "--input", input],
         { cwd: config.yakRepoPath, detached: true, stdio: "ignore" },
       );
       child.unref();
