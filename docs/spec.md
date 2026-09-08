@@ -1,6 +1,17 @@
 # yak-harness — spec
 
-**Status:** design complete, ready to hand to an implementation effort.
+**Status:** v1 implemented. All seven §13 steps are merged — config +
+`doctor`, the re-declared yak schemas, `observe`, `plan` + the §8.2
+transition table, `apply` (launch / relabel / orphan / retry / stalled
+kill), the gate bridge, and `tick.log` / `--dry-run` / the overlap lock
+/ packaging. The `implement-change` reference workflow ships
+(`workflows/implement-change.yaml`). What is **not** done: the full
+§4.1 `deliver` loop (linear v1 — see §4.1 and
+[lchase/yak#35](https://github.com/lchase/yak/issues/35)), and an
+unattended cron-driven acceptance run over a live backlog. §13 carries
+the module-by-module map; where the shipped code deviates from the
+design here, the section says so inline.
+
 Assembled from the wayfinder effort in [`design/`](design/) — the map,
 decisions `01`–`07`, and `prototype-gate-bridge.md`. Section references
 like "decision 02" point at [`design/decisions/`](design/decisions/) for the
@@ -26,8 +37,9 @@ it:
 
 **yak's engine stays entirely ignorant that GitHub exists.** The
 harness drives yak only through its documented CLI (`yak run`,
-`yak resume`, `yak pending`) and its on-disk journal / `pending/`
-contract.
+`yak resume`) and its on-disk journal / `pending/` contract. (The
+design also assumed a machine-readable `yak pending`; yak 0.3.x has
+none, so the harness reads the `pending/` directory directly — §6.2.)
 
 ### Non-goals
 
@@ -68,7 +80,8 @@ any of it. `yak-harness doctor` checks 1–5 on demand.
    access to the target repo. The harness shells out to `gh` for every
    GitHub operation and never handles a token itself.
 2. **`yak` on `PATH`** (e.g. `npm i -g @lchase/yak`), invocable as
-   `yak`. Used as a subprocess: `yak run`, `yak resume`, `yak pending`.
+   `yak`. Used as a subprocess: `yak run`, `yak resume` (yak ≥ 0.3.0,
+   for `yak run --input`).
 3. **The target repo checked out** at `yakRepoPath` (config), on its
    default branch. The harness never clones or pulls it — keeping that
    checkout current is the operator's job (or a separate cron).
@@ -353,9 +366,11 @@ harness writes `.harness/runs/<run-id>.json = { pid, issue, launchedAt }`
 This file is operational scratch: a stale one makes the kill a no-op,
 and the full scan remains authoritative for everything else.
 
-(This subsumes an earlier `.harness/launching` breadcrumb from
-decision 02: the same file is written *before* the spawn as a
-launch-in-progress marker, then rewritten with the pid and kept.)
+*As built (`src/constants.ts`), the pre-spawn breadcrumb and the
+durable pid file are two files, not one: `.harness/runs/launching-<issue>.json`
+is dropped before the spawn and cleared once the marker comment lands,
+then `.harness/runs/<run-id>.json` carries the pid for the §9.3 kill.
+Both are non-load-bearing — a full rescan reconstructs the truth.*
 
 ### 5.5 Orphans and stale markers
 
@@ -400,9 +415,15 @@ Returns an `Observation`:
 1. **`issues[]`** — one `gh` query for issues carrying any
    harness-relevant label (§5.3). Parse marker comments into
    `runId ↔ issueNumber` both ways.
-2. **`pending[]`** — parsed `yak pending`: run id, open step ids,
-   per-step `kind` + first line of `.rendered`.
-3. **`runs[]`** — one `runsDir` listing; classify each by journal tail:
+2. **`pending[]`** — run id, open step ids, per-step `kind` + first
+   line of `.rendered`. *Implemented as a disk scan of
+   `<runDir>/pending/*.request.json` (a request with a sibling
+   `.answer.json` is already answered and skipped), not `yak pending` —
+   yak 0.3.x has no machine-readable `yak pending`. Other references to
+   `yak pending` in this spec (§5.4, §5.5) mean this same scan.*
+3. **`runs[]`** — one `runsDir` listing; classify each by journal tail
+   (the journal file is `<runDir>/journal.jsonl`; every "`.runs/<id>/journal`"
+   in this spec is that file):
    - `alive` — last event is not `run.finished`
    - `suspended` — last event `run.finished` + `status: 'suspended'`
    - `ok` / `failed` — last event `run.finished` with that status
@@ -856,16 +877,27 @@ prerequisite. Filed against yak proper 2026-09-06:
 
 ---
 
-## 13. Suggested implementation order
+## 13. Implementation map
 
-1. Config schema + `doctor` + the three re-declared yak on-disk zod
-   schemas (§4, §10.1).
-2. `observe` — the read phase, fully (§6.2). Test against fixture
-   `.runs/` trees and canned `gh` JSON.
-3. `plan` + the §8.2 transition table — pure, exhaustively unit-tested.
-4. `apply` for C and D only (relabel + launch) — end-to-end a backlog
-   issue to `yak:pr-open` against a real local yak.
-5. `apply` for E (orphan/stale) and §9 (retry, stalled kill).
-6. The gate bridge (§7) — A and B. The prototype
-   (`prototype-gate-bridge.md`) is the acceptance reference.
-7. `tick.log`, `--dry-run`, the lock file, packaging.
+The build followed this order; all seven steps are merged. Each row
+names the modules that carry it.
+
+| # | scope | modules | notes |
+|---|---|---|---|
+| 1 | Config schema + `doctor` + the three re-declared yak on-disk zod schemas (§4, §10.1) | `config.ts`, `doctor.ts`, `yak-schemas.ts` | done |
+| 2 | `observe` — the read phase (§6.2), tested against fixture `.runs/` trees + canned `gh` JSON | `observe.ts`, `observe-deps.ts`, `src/__fixtures__/observe/` | done. `pending[]` is a `pending/*.request.json` disk scan, not `yak pending` (§6.2); journal file is `journal.jsonl` |
+| 3 | `plan` + the §8.2 transition table — pure, exhaustively unit-tested | `plan.ts`, `transition.ts`, `plan.test.ts`, `transition.test.ts` | done |
+| 4 | `apply` for C and D (relabel + launch) — backlog issue end-to-end to `yak:pr-open` against a real local yak | `apply.ts`, `apply-deps.ts`, `workflow-path.ts` | done. `apply` self-creates a missing `yak:<status>` label; an unexpected dep throw becomes a clean aborted tick |
+| 5 | `apply` for E (orphan/stale) and §9 (retry, stalled kill) | `apply.ts` | done |
+| 6 | The gate bridge (§7) — A and B; `prototype-gate-bridge.md` is the acceptance reference | `gate-bridge.ts`, `gate-bridge.test.ts` | done. Resume held until **every** concurrently-open gate on a run has an answer file; a resume that re-parks on a later gate is a success if the journal advanced |
+| 7 | `tick.log`, `--dry-run`, the lock file, packaging | `tick-log.ts`, `lock.ts`, `cli.ts`, `tick.ts` | done |
+
+**Not yet built:**
+
+- The full §4.1 `deliver` loop — v1 ships a linear `build → verify →
+  checkpoint`; the bounded `loop` + `review`/`rank` fan-out wait on
+  [lchase/yak#35](https://github.com/lchase/yak/issues/35) (§4.1).
+- An unattended cron-driven acceptance run over a live backlog — the
+  overlap lock, kill-recovery, and `tick.log` rotation all have unit
+  coverage, but the end-to-end `cron` trial against a real sandbox is
+  still a manual exercise.
