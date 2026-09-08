@@ -20,6 +20,24 @@ export {
   loadConfig,
 } from "./config.js";
 export * as constants from "./constants.js";
+export { buildWorkflowGraph, layoutWorkflow } from "./dashboard/graph.js";
+export { type RenderOptions, renderDashboard } from "./dashboard/render.js";
+export { parseEnvelopes, replayRun } from "./dashboard/replay.js";
+export {
+  createDashboardServer,
+  handleRequest,
+  type ServeOptions,
+  serveDashboard,
+} from "./dashboard/serve.js";
+export {
+  buildDashboardModel,
+  type DashboardDeps,
+  type DashboardModel,
+  detectDrift,
+  type RunView,
+  realDashboardDeps,
+  runDashboard,
+} from "./dashboard.js";
 export {
   type CheckResult,
   type DoctorDeps,
