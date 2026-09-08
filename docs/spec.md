@@ -311,12 +311,14 @@ fully hands-free, and a substantial feature stops three times.
 > `maxConcurrent` cap.
 
 `implement-change` covers bug / feature / chore by *skipping* steps.
-Work whose graph is **structurally** different cannot be expressed that
-way — a spike terminates on a findings artifact with no PR step
-([#38](https://github.com/lchase/yak-harness/issues/38)), a dependency
-bump has no gates ([#39](https://github.com/lchase/yak-harness/issues/39)).
-Those are separate workflow files (each its own design), chosen per
-issue.
+Work whose graph is **structurally** different is a separate workflow
+file, chosen per issue — a spike whose deliverable is a findings doc +
+pre-scoped follow-up issues ([#38](https://github.com/lchase/yak-harness/issues/38)),
+a dependency bump with no gates ([#39](https://github.com/lchase/yak-harness/issues/39)).
+A workflow ending in `gh issue create` is symmetric with
+`implement-change`'s `gh pr create`; only one that makes no repo change
+at all needs a harness hint (an `opensPR` flag, so §8.2's "ok, no PR"
+cell does not flag it — #38).
 
 **Config.** An optional map alongside `workflow`:
 

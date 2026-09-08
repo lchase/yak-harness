@@ -119,8 +119,16 @@ when the graph **structurally** diverges:
 |---|---|---|
 | `implement-change` | — (the default) | shipped (§4.1) |
 | `fix-defect` | maybe leaner gating / regression-test-first — open question | [#37](https://github.com/lchase/yak-harness/issues/37) |
-| `spike` / `research` | terminates on findings; **no PR** — needs a harness terminal state for that | [#38](https://github.com/lchase/yak-harness/issues/38) |
+| `spike` / `research` | deliverable is a findings doc + pre-scoped follow-up issues, not a code change | [#38](https://github.com/lchase/yak-harness/issues/38) |
 | `dependency-bump` | **zero gates**; PR straight from a deterministic command | [#39](https://github.com/lchase/yak-harness/issues/39) |
+
+A workflow ending in `gh issue create` is exactly symmetric with
+`implement-change`'s `gh pr create` — yak is a workflow engine, no
+engine change. If such a workflow *also* opens a doc PR (variant A in
+#38) the harness is untouched. Only a workflow that makes **no repo
+change at all** (variant B) needs one bit — an `opensPR` flag on the
+routing-map value so §8.2's "ok, no PR" cell does not read it as a
+workflow bug.
 
 ### 7. Periodic / non-issue work stays out
 
@@ -152,7 +160,7 @@ Small, self-contained:
   parsing, GitHub's native issue types, the assignee, etc.
 - The harness creating issues or running anything on a timer of its own.
 - Designing or shipping the `fix-defect` / `spike` / `dependency-bump`
-  workflow files — each is its own design ticket (#37, #38, #39). #38 in
-  particular surfaces a harness-side question (a terminal state for a
-  run that finishes `ok` with no PR by design — today §8.2 routes that
-  to `yak:failed`).
+  workflow files — each is its own design ticket (#37, #38, #39). #38's
+  variant B optionally adds an `opensPR` flag to the routing-map value
+  (default `true`) so §8.2 does not flag a deliberately-no-PR run as a
+  workflow bug — small, and out of this ticket.
