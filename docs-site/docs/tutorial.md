@@ -74,6 +74,18 @@ move:
 yak  →  yak:running  →  (yak:waiting on a gate)  →  yak:pr-open  →  yak:done
 ```
 
+:::tip Watch it happen
+In another terminal, leave the [dashboard](./monitoring) running:
+
+```bash
+yak-harness dashboard --config harness.config.json --serve
+```
+
+Open `http://127.0.0.1:8787`. Each run shows up on its workflow — which
+step it is on, what `assess` decided, the gate prompt when it suspends.
+It refreshes itself; you never touch it.
+:::
+
 Expected paths differ by issue — a localised bug with high `assess`
 confidence runs hands-free to `yak:pr-open`; one where `assess` is
 unsure stops at a `confirm-scope` gate; a feature fires the design and
@@ -151,4 +163,5 @@ fully clean slate, then re-seed.
   parsed `key: value` reply → `writeAnswer` → `yak resume`
 - `yak:pr-open` → `yak:done` on merge
 - `.harness/tick.log`, one JSON line per tick
+- the [dashboard](./monitoring) showing each run on its workflow as it moved
 - `reset.sh` making the whole thing repeatable

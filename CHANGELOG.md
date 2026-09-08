@@ -7,7 +7,46 @@ file is maintained by hand until a release-please pipeline lands
 
 ## [Unreleased]
 
+### Added
+
+- `yak-harness dashboard --config <path> [--out <file>]`: a read-only
+  monitor (`docs/design/dashboard.md`). One shot — `observe()` the same
+  truth the tick reads, replay each run's journal onto its snapshotted
+  `.runs/<id>/workflow.json` step graph, render one self-contained HTML
+  page (inline CSS, no scripts, no local assets — the only network
+  reference is the Geist / Geist Mono Google Fonts stylesheet, with a
+  system fallback stack), exit. Holds no state; the harness never
+  imports it. Shows each live run positioned on its workflow, and a
+  drift line wherever the harness view and the journal disagree
+  (`detectDrift`). Each run card leads with troubleshooting context:
+  the linked GitHub issue #/title, the `assess` artifact (kind ·
+  confidence · the run's own summary of the task), the verbatim gate
+  prompt when suspended, and a collapsible `plan` checklist. The
+  per-step pipeline is a CSS grid of state boxes (dashed = skipped,
+  ring = the step the run is on now); a legend keys the palette, which
+  the run-state pills share. Visual design: "Yak Harness Monitor v2"
+  (claude.ai/design `e5ae1991`). yak-journal coupling is quarantined to
+  `src/dashboard/replay.ts` and tolerant — an unknown event type is
+  skipped, degrading to the coarse started/finished/failed view.
+
+- `yak-harness dashboard --serve [--port 8787] [--host 127.0.0.1]
+  [--interval 10]`: a live local monitor. A loopback HTTP server
+  (Node's own `http`, still zero deps) that runs the *entire* dashboard
+  pass — `observe()` (GitHub via `gh`, `.runs/` journals + `workflow.json`
+  + artifacts off disk), replay, render — from scratch on every request;
+  nothing cached, nothing held between requests, so a restart
+  reconstructs the identical view. `/` serves the page plus a small
+  poll script that re-fetches `/fragment` (the `.wrap` inner HTML only)
+  every `--interval` seconds and swaps it in without moving the scroll
+  position; five consecutive failed polls trigger one full reload to
+  recover from a server restart. Read-only and tick-independent: no
+  lock, no `tick.log`, no writes. Ctrl-C stops it; nothing to clean up.
+
 ### Docs
+
+- Dashboard design note (`docs/design/dashboard.md`): why a read-only
+  projection is allowed where a load-bearing one would be a bug, the
+  five hard constraints, and what it renders.
 
 - Documentation site (#28, #29): a private `docs-site/` Docusaurus 3.10
   workspace (independent `package.json`, so the root's `zod`/`ajv`

@@ -1,22 +1,29 @@
 // yak-harness CLI entry (spec §10.2).
 //
-//   yak-harness tick   --config <path> [--dry-run]
-//   yak-harness doctor --config <path>
+//   yak-harness tick      --config <path> [--dry-run]
+//   yak-harness doctor    --config <path>
+//   yak-harness dashboard --config <path> [--out <file>]
+//   yak-harness dashboard --config <path> --serve [--port N] [--host H] [--interval S]
 //
-// `doctor` is implemented (ticket #2). `tick` is still a scaffold.
+// `dashboard` is a read-only monitor (docs/design/dashboard.md): it takes
+// no lock, writes no `tick.log`, and mutates nothing. `--serve` runs a
+// loopback HTTP server that re-renders the whole view on every request.
 
-import { realpathSync } from "node:fs";
+import { realpathSync, writeFileSync } from "node:fs";
 import { argv } from "node:process";
 import { fileURLToPath } from "node:url";
 import { realApplyDeps } from "./apply.js";
 import { ConfigError, loadConfig } from "./config.js";
 import { harnessDir } from "./constants.js";
+import { serveDashboard } from "./dashboard/serve.js";
+import { realDashboardDeps, runDashboard } from "./dashboard.js";
 import { formatReport, runDoctor } from "./doctor.js";
 import { acquireTickLock, LockHeld } from "./lock.js";
 import { ObserveError, realObserveDeps } from "./observe.js";
 import { runTick } from "./tick.js";
 
-const USAGE = "usage: yak-harness <tick|doctor> --config <path> [--dry-run]";
+const USAGE =
+  "usage: yak-harness <tick|doctor|dashboard> --config <path> [--dry-run] [--out <file>] [--serve [--port N] [--host H] [--interval S]]";
 
 /** Thrown to unwind to {@link cli} with a chosen exit code and message. */
 class CliExit extends Error {
@@ -28,25 +35,60 @@ class CliExit extends Error {
   }
 }
 
-function parseArgs(argv: string[]): {
+interface ParsedArgs {
   command: string | undefined;
   configPath: string | undefined;
   dryRun: boolean;
-} {
+  out: string | undefined;
+  serve: boolean;
+  port: number;
+  host: string;
+  intervalSeconds: number;
+}
+
+function parseIntArg(raw: string | undefined, flag: string): number {
+  const n = Number(raw);
+  if (!raw || !Number.isInteger(n) || n <= 0) {
+    throw new CliExit(2, `${flag} needs a positive integer\n${USAGE}`);
+  }
+  return n;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...rest] = argv;
-  let configPath: string | undefined;
-  let dryRun = false;
+  const parsed: ParsedArgs = {
+    command,
+    configPath: undefined,
+    dryRun: false,
+    out: undefined,
+    serve: false,
+    port: 8787,
+    host: "127.0.0.1",
+    intervalSeconds: 10,
+  };
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === "--config") {
-      configPath = rest[++i];
+      parsed.configPath = rest[++i];
     } else if (arg === "--dry-run") {
-      dryRun = true;
+      parsed.dryRun = true;
+    } else if (arg === "--out") {
+      parsed.out = rest[++i];
+    } else if (arg === "--serve") {
+      parsed.serve = true;
+    } else if (arg === "--port") {
+      parsed.port = parseIntArg(rest[++i], "--port");
+    } else if (arg === "--host") {
+      const h = rest[++i];
+      if (!h) throw new CliExit(2, `--host needs a value\n${USAGE}`);
+      parsed.host = h;
+    } else if (arg === "--interval") {
+      parsed.intervalSeconds = parseIntArg(rest[++i], "--interval");
     } else {
       throw new CliExit(2, `unknown argument: ${arg}\n${USAGE}`);
     }
   }
-  return { command, configPath, dryRun };
+  return parsed;
 }
 
 interface CliIo {
@@ -73,12 +115,25 @@ function runTickGuarded(
   }
 }
 
-/** Run one CLI invocation. Returns the process exit code; performs no `process.exit`. */
-export function cli(argv: string[], io: CliIo): number {
+/**
+ * Run one CLI invocation. Returns the process exit code, or a promise of
+ * it for the long-lived `dashboard --serve` server (resolves on Ctrl-C).
+ * Performs no `process.exit`.
+ */
+export function cli(argv: string[], io: CliIo): number | Promise<number> {
   try {
-    const { command, configPath, dryRun } = parseArgs(argv);
+    const {
+      command,
+      configPath,
+      dryRun,
+      out,
+      serve,
+      port,
+      host,
+      intervalSeconds,
+    } = parseArgs(argv);
 
-    if (command !== "tick" && command !== "doctor") {
+    if (command !== "tick" && command !== "doctor" && command !== "dashboard") {
       throw new CliExit(2, USAGE);
     }
     if (!configPath) {
@@ -97,6 +152,29 @@ export function cli(argv: string[], io: CliIo): number {
       const report = runDoctor(config);
       io.out(formatReport(report));
       return report.ok ? 0 : 1;
+    }
+
+    if (command === "dashboard") {
+      if (serve) {
+        return serveDashboard(config, { port, host, intervalSeconds }, io);
+      }
+      let html: string;
+      try {
+        html = runDashboard(config, {
+          observe: realObserveDeps(config),
+          dashboard: realDashboardDeps(config),
+        });
+      } catch (err) {
+        if (err instanceof ObserveError) throw new CliExit(1, err.message);
+        throw err;
+      }
+      if (out) {
+        writeFileSync(out, html, "utf8");
+        io.err(`wrote ${out}`);
+      } else {
+        io.out(html);
+      }
+      return 0;
     }
 
     const dir = harnessDir(config.yakRepoPath);
@@ -147,10 +225,11 @@ function invokedAsScript(): boolean {
 }
 
 if (invokedAsScript()) {
-  process.exit(
-    cli(argv.slice(2), {
-      out: (t) => console.log(t),
-      err: (t) => console.error(t),
-    }),
-  );
+  const code = cli(argv.slice(2), {
+    out: (t) => console.log(t),
+    err: (t) => console.error(t),
+  });
+  // `dashboard --serve` returns a promise that resolves only on Ctrl-C;
+  // every other command returns its exit code synchronously.
+  Promise.resolve(code).then((c) => process.exit(c));
 }

@@ -5,11 +5,13 @@ title: CLI reference
 
 # CLI reference
 
-Two commands. Both require `--config <path>`.
+Three commands. All require `--config <path>`.
 
 ```
-yak-harness tick   --config <path> [--dry-run]
-yak-harness doctor --config <path>
+yak-harness tick      --config <path> [--dry-run]
+yak-harness doctor    --config <path>
+yak-harness dashboard --config <path> [--out <file>]
+yak-harness dashboard --config <path> --serve [--port N] [--host H] [--interval S]
 ```
 
 ## `tick`
@@ -84,6 +86,29 @@ doctor: all checks passed
 ```
 
 Run it after box setup and after any yak / `gh` / Node upgrade.
+
+## `dashboard`
+
+Renders the harness's whole view — runs on their workflows, gates,
+label drift — as one HTML page. Read-only: no lock, no `tick.log`, no
+writes. See [Monitoring](./monitoring) for how to read the page.
+
+```bash
+yak-harness dashboard --config /srv/harness.config.json --out monitor.html
+```
+
+`--out <file>` writes one snapshot (omit it for stdout). `--serve` runs
+a loopback HTTP server instead that re-renders on every request:
+
+```bash
+yak-harness dashboard --config /srv/harness.config.json --serve
+# yak-harness monitor on http://127.0.0.1:8787  (refresh 10s, Ctrl-C to stop)
+```
+
+`--port` (default `8787`), `--host` (default `127.0.0.1`), `--interval`
+(default `10`, seconds between polls). Exit `1` for a bad config; the
+server itself stays up through a transient `gh` failure and shows the
+error until the next refresh.
 
 ## What there is no command for
 

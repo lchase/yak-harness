@@ -88,4 +88,6 @@ Every real tick also appends one JSON line to
 
 - [Tutorial](./tutorial) — a full loop end to end against a sandbox,
   including answering a gate and merging the PR. Spends real API budget.
+- [Monitoring](./monitoring) — `yak-harness dashboard --serve` for a
+  live picture of every run on its workflow.
 - [Operations](./operations) — put the tick on cron and leave it.
