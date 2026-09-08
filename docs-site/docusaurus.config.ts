@@ -7,7 +7,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'yak-harness',
   tagline: 'a stateless cron reconciler between a GitHub Issues backlog and yak',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/yak-harness-logo.svg',
 
   future: {
     v4: true,
@@ -49,6 +49,11 @@ const config: Config = {
     },
     navbar: {
       title: 'yak-harness',
+      logo: {
+        alt: 'yak-harness logo',
+        src: 'img/yak-harness-logo-light.svg',
+        srcDark: 'img/yak-harness-logo.svg',
+      },
       items: [
         {
           href: 'https://github.com/lchase/yak-harness',
