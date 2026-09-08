@@ -110,6 +110,7 @@ non-zero.
   "stalledAfterMinutes": 45,            // required — no safe default
   "maxConcurrent": 2,                   // default 2
   "workflow": "implement-change",       // default "implement-change" (see 4.1)
+  "workflowByLabel": {},                // optional, default {} — routing map (see 4.2, post-v1)
   "inputTemplate": "issueRef={{repo}}#{{number}}"
                                         // {{repo}} {{number}} {{title}} substitution
 }
@@ -121,9 +122,10 @@ non-zero.
 - **`maxConcurrent`** — how many `yak run`s may be in flight at once.
   One launch per tick regardless (§6.2), so an idle harness ramps to
   this cap over several ticks.
-- **`workflow` + `inputTemplate`** — one workflow per deployment,
-  `implement-change` by default (§4.1). Label-routing to multiple
-  workflows is out of scope for v1.
+- **`workflow` + `inputTemplate`** — the workflow to launch,
+  `implement-change` by default (§4.1). v1 is one workflow per
+  deployment; §4.2 adds an optional `workflowByLabel` map for routing
+  work to structurally different workflows (post-v1, same single tick).
 
 **Locked constants** (a `const` in source, not config; each carries a
 `// config candidate if a real need appears` comment):
@@ -186,11 +188,14 @@ defect, promotes the pin, commits) → `verify` green → `checkpoint` skips
 → `approve-pr` suspends → resume → PR opened. The one human touch is
 `approve-pr`, by design.
 
-**Why one workflow, not `yak:bug` / `yak:feature` label-routing:** ~70%
-shared structure, and routing is out of scope (§11). The first step
-classifies the change; every downstream feature-only step keys its
-`skipIf` off that classification. "Trivial vs substantial" is a spectrum,
-not a bug/feature binary.
+**Why one workflow for bug / feature / chore:** ~70% shared structure.
+The first step classifies the change; every downstream feature-only step
+keys its `skipIf` off that classification. "Trivial vs substantial" is a
+spectrum, not a bug/feature binary, so a *subset* of one graph beats
+three near-identical graphs. Work whose graph **structurally** differs —
+a spike that never opens a PR, a dependency bump with no gates — is a
+different workflow, selected per issue: see §4.2 (post-v1; v1 ships
+`implement-change` as the sole `config.workflow`).
 
 ```ts
 workflow('implement-change', {
@@ -298,6 +303,57 @@ fully hands-free, and a substantial feature stops three times.
    step.** `build`'s round-1 map fans out to `likelySubtasks` agents;
    size the threshold for the slowest one, not the whole run.
 
+### 4.2 Workflow routing (decision 08 — post-v1)
+
+> v1 ships one workflow (`config.workflow`, §4.1). This section specifies
+> the additive change that lets one deployment run several. It does not
+> alter the tick topology: still one cron, one `.harness/tick.lock`, one
+> `maxConcurrent` cap.
+
+`implement-change` covers bug / feature / chore by *skipping* steps.
+Work whose graph is **structurally** different cannot be expressed that
+way — a spike terminates on a findings artifact with no PR step, a
+dependency bump has no gates. Those are separate workflow files, chosen
+per issue.
+
+**Config.** An optional map alongside `workflow`:
+
+```jsonc
+"workflow": "implement-change",   // default / fallback (unchanged)
+"workflowByLabel": {              // optional — omitted = v1 behaviour
+  "spike":      "spike",
+  "dependency": "dependency-bump",
+  "review":     "review"
+}
+```
+
+Keys are label strings the operator picks; the harness matches them
+literally. Values resolve as `workflow` does (`src/workflow-path.ts`).
+`qualifyingLabel` (`yak`) is unchanged and still required — a routing
+label is a **companion** a human adds when the default is wrong.
+
+**Selection** — `pickWorkflow(issue, config)`, a pure function evaluated
+in `plan` (§6.1) from `issue.labels` + config alone:
+
+| `workflowByLabel` keys on the issue | workflow |
+|---|---|
+| none | `config.workflow` |
+| exactly one | its mapped value |
+| two or more | **issue fault** — flag, launch nothing (§8.1, like two `yak:<status>` labels) |
+
+Two routing labels is ambiguous; the harness never guesses a precedence.
+
+**Launch + assertion.** The §8.2 launch action (D) carries the resolved
+workflow. The §5.1 step-4 journal assertion compares `run.started.workflow`
+against `pickWorkflow(issue, config)` — recomputed from the issue's
+current labels every tick, never stored (invariant 3).
+
+**Periodic / non-issue work stays out.** A time-triggered architecture
+review is not a harness feature. The seam: a separate cron runs
+`gh issue create --label yak --label review …`; the harness picks that
+issue up and routes it like any other. The harness never creates issues
+and never schedules work.
+
 ---
 
 ## 5. Run ↔ issue linkage (decision 01)
@@ -316,7 +372,8 @@ The harness is the sole launcher and performs **one launch per tick**
 1. `listdir(runsDir)` → `before` set.
 2. Spawn `yak run <workflow> --isolation worktree` **detached** (§5.4),
    with `--input` built from `inputTemplate` (yak#27, §12.1 — the one
-   hard yak dependency).
+   hard yak dependency). `<workflow>` is `config.workflow`, or
+   `pickWorkflow(issue, config)` once §4.2 routing lands.
 3. Poll `listdir(runsDir)` until exactly one new directory appears
    (sub-second — yak `mkdir`s the run dir early). `after - before` must
    be exactly one name; that is the run id. Zero or multiple new dirs
@@ -829,7 +886,7 @@ Overlap is the harness's concern (§6.6), not the operator's. A
 | **PR-revision loop** (human requests changes on an open PR, harness resumes the implement loop). | Not part of reaching a first PR unattended. | fresh effort |
 | **Refactoring the yak repo into packages.** | A redraw of yak's architecture with its own tradeoffs; the harness consumes yak through the CLI + on-disk contract regardless of packaging. Building `yak-harness` standalone first gives that later effort a concrete external consumer to design against. | its own wayfinder effort if a monorepo is on the table |
 | **Aggregate observability** — dashboards, cross-run metrics, an alert sink. | The GitHub issues are the record; `.harness/tick.log` is for debugging the harness. | fresh effort |
-| **Label-routing to multiple workflows** (`yak:bug` → `fix-defect`, …). | One workflow per deployment covers v1; `implement-change` (§4.1) already spans bug / feature / chore via `skipIf`. | a future ticket |
+| **Label-routing to multiple workflows** (`spike` → a no-PR workflow, …). | Out of scope for **v1** — one workflow per deployment. Design resolved in decision 08 / §4.2: an optional `workflowByLabel` map, selected per issue by a pure function in `plan`, same single tick. | scheduled — §4.2 |
 
 ---
 
