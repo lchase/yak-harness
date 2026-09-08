@@ -1,8 +1,9 @@
 # yak factory harness — map
 
-> **STATUS: complete (2026-09-06).** All design tickets 01–07 resolved;
-> [the spec](../spec.md) is assembled and ready to hand to an
-> implementation effort. Nothing left on the frontier.
+> **STATUS: complete (2026-09-06).** Design tickets 01–07 resolved; [the
+> spec](../spec.md) is assembled and shipped as v1. Decision 08
+> (workflow routing) is a resolved **post-v1** addition — spec §4.2,
+> `decisions/08-workflow-routing.md` — not part of the v1 build.
 
 ## Destination
 
@@ -179,9 +180,19 @@ effort.
   + stderr for fatals, nothing remote; `tick --dry-run` for
   observe+plan preview.
 
+- [08 — Workflow routing](decisions/08-workflow-routing.md) — **post-v1**.
+  One tick / one cron / one lock, always: routing is a pure
+  `pickWorkflow(issue, config)` in `plan`, not a second invocation.
+  `config.workflow` stays the default; optional `workflowByLabel` maps a
+  companion label → a structurally different workflow (`spike` with no
+  PR, `dependency-bump` with no gates). Two routing labels = an issue
+  fault. Periodic/non-issue work stays out — a separate cron files the
+  issue. Spec §4.2.
+
 ## Not yet specified
 
-- *(empty — destination reached; see [the spec](../spec.md))*
+- *(empty — v1 destination reached; see [the spec](../spec.md). Decision
+  08 is specified but deliberately outside the v1 build.)*
 
 ## Out of scope
 
