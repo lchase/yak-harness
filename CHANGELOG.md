@@ -7,6 +7,15 @@ file is maintained by hand until a release-please pipeline lands
 
 ## [Unreleased]
 
+### Docs
+
+- `docs/spec.md` refreshed against the shipped code (#30): status line
+  now says "v1 implemented" and lists what is not done; §13 is a
+  module-by-module implementation map instead of a suggested order;
+  §2 / §3 / §5.4 / §6.2 note where the build deviates from the design
+  (`pending/` disk scan vs `yak pending`, `journal.jsonl` filename, the
+  two-file launch breadcrumb + pid file).
+
 ### Changed
 
 - The set of runs awaiting a human answer is now derived by scanning the
