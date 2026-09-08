@@ -5,3 +5,7 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# docs-site (Docusaurus)
+docs-site/build/
+docs-site/.docusaurus/

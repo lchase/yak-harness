@@ -1,0 +1,8 @@
+{
+  "label": "Patterns",
+  "position": 9,
+  "link": {
+    "type": "generated-index",
+    "description": "Short, situation-first recipes for things that come up while operating the harness."
+  }
+}
