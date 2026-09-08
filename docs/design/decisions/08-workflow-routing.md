@@ -115,12 +115,12 @@ monolith handles it well (the §4.1 "70% shared structure" argument still
 holds for those three). A separate workflow file earns its place only
 when the graph **structurally** diverges:
 
-| workflow | why it can't be `implement-change` + `skipIf` |
-|---|---|
-| `implement-change` | — (the default) |
-| `spike` | terminates on a findings artifact; **no PR step at all** |
-| `dependency-bump` | **zero gates**; opens a PR straight from a deterministic command |
-| `review` | reads the codebase, writes a report; no code change, no PR |
+| workflow | why it can't be `implement-change` + `skipIf` | design |
+|---|---|---|
+| `implement-change` | — (the default) | shipped (§4.1) |
+| `fix-defect` | maybe leaner gating / regression-test-first — open question | [#37](https://github.com/lchase/yak-harness/issues/37) |
+| `spike` / `research` | terminates on findings; **no PR** — needs a harness terminal state for that | [#38](https://github.com/lchase/yak-harness/issues/38) |
+| `dependency-bump` | **zero gates**; PR straight from a deterministic command | [#39](https://github.com/lchase/yak-harness/issues/39) |
 
 ### 7. Periodic / non-issue work stays out
 
@@ -151,5 +151,8 @@ Small, self-contained:
 - Selecting a workflow by anything other than a label — issue body
   parsing, GitHub's native issue types, the assignee, etc.
 - The harness creating issues or running anything on a timer of its own.
-- Shipping the `spike` / `dependency-bump` / `review` workflow files —
-  those are separate, and each is its own small design.
+- Designing or shipping the `fix-defect` / `spike` / `dependency-bump`
+  workflow files — each is its own design ticket (#37, #38, #39). #38 in
+  particular surfaces a harness-side question (a terminal state for a
+  run that finishes `ok` with no PR by design — today §8.2 routes that
+  to `yak:failed`).

@@ -312,9 +312,11 @@ fully hands-free, and a substantial feature stops three times.
 
 `implement-change` covers bug / feature / chore by *skipping* steps.
 Work whose graph is **structurally** different cannot be expressed that
-way — a spike terminates on a findings artifact with no PR step, a
-dependency bump has no gates. Those are separate workflow files, chosen
-per issue.
+way — a spike terminates on a findings artifact with no PR step
+([#38](https://github.com/lchase/yak-harness/issues/38)), a dependency
+bump has no gates ([#39](https://github.com/lchase/yak-harness/issues/39)).
+Those are separate workflow files (each its own design), chosen per
+issue.
 
 **Config.** An optional map alongside `workflow`:
 
