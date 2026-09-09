@@ -174,9 +174,11 @@ effort.
   systemd timer optional); overlap guarded by a harness-owned
   `.harness/tick.lock`. Box preconditions (gh authed, yak on PATH,
   repo checked out at `yakRepoPath`, persistent FS) stated in the
-  spec, checked by `yak-harness doctor`. Deploy = `git pull && npm run
-  build`; conventional commits + CHANGELOG but **npm publish
-  deferred**. Logging: one self-rotating JSON-lines `.harness/tick.log`
+  spec, checked by `yak-harness doctor`. Published to npm as
+  `@lchase/yak-harness` via release-please + OIDC (the decision-07
+  deferral was lifted once a second box needed it; spec §10.4); a
+  source checkout still runs an unreleased build. Logging: one
+  self-rotating JSON-lines `.harness/tick.log`
   + stderr for fatals, nothing remote; `tick --dry-run` for
   observe+plan preview.
 

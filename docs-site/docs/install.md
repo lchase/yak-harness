@@ -11,19 +11,13 @@ will work in.
 
 ## Install
 
-```bash
-# 1. yak (published to npm)
-npm install -g @lchase/yak
+Both are on npm:
 
-# 2. yak-harness (no npm release yet — build from source)
-git clone git@github.com:lchase/yak-harness.git
-cd yak-harness
-npm ci && npm run build
-npm link
+```bash
+npm install -g @lchase/yak @lchase/yak-harness
 ```
 
-`npm link` puts the `yak-harness` bin on `PATH`. Both commands now
-work:
+Check:
 
 ```bash
 yak --version           # >= 0.3.0
@@ -33,12 +27,26 @@ yak-harness --help
 ## Upgrade to latest
 
 ```bash
-npm install -g @lchase/yak@latest                      # yak
-cd yak-harness && git pull && npm ci && npm run build  # yak-harness
+npm install -g @lchase/yak@latest @lchase/yak-harness@latest
 ```
 
 No restart — the tick is a stateless process, so the next run picks up
-the new build. Run `yak-harness doctor` again afterwards.
+the new version. Run `yak-harness doctor` again afterwards.
+
+### From a source checkout instead
+
+To run an unreleased build (contributing, or testing `main`):
+
+```bash
+git clone git@github.com:lchase/yak-harness.git
+cd yak-harness
+npm ci && npm run build
+npm link                # puts the `yak-harness` bin on PATH
+```
+
+Upgrades are `git pull && npm ci && npm run build`. Or skip `npm link`
+and invoke `node /path/to/yak-harness/dist/cli.js tick --config …`
+directly.
 
 ## Run
 
@@ -88,10 +96,6 @@ does **not** install or manage any:
 4. **Node 22 or newer** to run `yak-harness` itself.
 5. **Write access** to `<yakRepoPath>/.runs/` and
    `<yakRepoPath>/.harness/`.
-
-If you would rather not `npm link`, invoke the built entry directly —
-`node /path/to/yak-harness/dist/cli.js tick --config …` — or put
-`dist/cli.js` on `PATH` yourself.
 
 ## `yak-harness doctor`
 

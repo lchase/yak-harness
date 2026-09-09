@@ -155,8 +155,13 @@ its own cadence.
 
 TypeScript, ESM, Node 22, `tsup` build to `dist/`, `vitest`. `bin`
 entry `yak-harness`. Runtime deps: `zod`, `ajv` only. Conventional
-commits + a hand-maintained `CHANGELOG.md`; no npm publish pipeline in
-v1 (deploy = `git pull && npm run build` on the box).
+commits. Published to npm as **`@lchase/yak-harness`** via
+`release-please` + OIDC trusted publishing (`.github/workflows/release-please.yml`
+opens the release PR and dispatches `publish.yml`). `CHANGELOG.md` is
+**release-please-generated from v0.1.0 on — never hand-edit it**; the
+`## Pre-0.1.0 development` section is frozen history. The box can still
+run from a source checkout (`git pull && npm run build`) instead of the
+published package.
 
 ## Commands
 
