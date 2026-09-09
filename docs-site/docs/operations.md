@@ -111,6 +111,16 @@ bypass the 2-attempt cap unless you also remove earlier markers.
 ## Repeatability
 
 For a sandbox loop you want to run more than once, keep a pristine tag
-(the `yak-kanban-sandbox` uses `seed`) and a `scripts/reset.sh` that
-resets to it and prunes the `yak/*` worktrees and branches the runs
-left behind. See the [tutorial](./tutorial#6-reset-and-go-again).
+(the `yak-kanban-sandbox` uses `seed`) and a `scripts/reset.sh` that:
+
+- resets the working tree to that tag;
+- prunes the `yak/*` worktrees and branches the runs left behind
+  (deleting a pushed branch also closes its PR);
+- deletes `.runs/` and `.harness/` — both are gitignored, so
+  `git clean` leaves them, and a stale `.runs/` journal would make the
+  next loop's `observe` see orphan runs;
+- with `--github`, closes the qualifying-labelled issues, since the
+  harness never closes an issue itself and a re-seed would otherwise
+  duplicate them.
+
+See the [tutorial](./tutorial#6-reset-and-go-again).

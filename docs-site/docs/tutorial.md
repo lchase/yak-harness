@@ -146,14 +146,18 @@ GitHub's auto-delete setting or yours.
 ## 6. Reset and go again
 
 ```bash
-scripts/reset.sh
+scripts/reset.sh            # local state only
+scripts/reset.sh --github   # …and close the seeded issues too
 ```
 
 Resets the sandbox repo to `seed`, prunes the `yak/*` worktrees and
-branches the runs created (which also closes their PRs), and is
-re-runnable any number of times. The seeded issues stay open — the
-harness never closes issues — so close or delete them by hand for a
-fully clean slate, then re-seed.
+branches the runs created (which also closes their PRs), deletes the
+`.runs/` and `.harness/` state, and is re-runnable any number of times.
+
+The harness never closes an issue (spec §8.4), so a plain reset leaves
+the seeded issues open — `scripts/seed-issues.sh` would then stack a
+second copy on top. Pass `--github` to close them first for a genuinely
+clean slate, then re-seed.
 
 ## What you just exercised
 
