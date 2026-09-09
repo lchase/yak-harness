@@ -11,7 +11,7 @@ will work in.
 
 ## Install
 
-Both are on npm:
+Both are published to npm:
 
 ```bash
 npm install -g @lchase/yak @lchase/yak-harness
@@ -23,6 +23,12 @@ Check:
 yak --version           # >= 0.3.0
 yak-harness --help
 ```
+
+`@lchase/yak-harness` releases are cut automatically from `main` by
+`release-please` (see [`RELEASING.md`](https://github.com/lchase/yak-harness/blob/main/RELEASING.md)),
+so `@latest` is always the newest tagged version. The bundled
+`implement-change` workflow ships inside the package — it moves with
+the version.
 
 ## Upgrade to latest
 
