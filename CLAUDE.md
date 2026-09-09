@@ -158,8 +158,8 @@ entry `yak-harness`. Runtime deps: `zod`, `ajv` only. Conventional
 commits. Published to npm as **`@lchase/yak-harness`** via
 `release-please` + OIDC trusted publishing (`.github/workflows/release-please.yml`
 opens the release PR and dispatches `publish.yml`). `CHANGELOG.md` is
-**release-please-generated from v0.1.0 on — never hand-edit it**; the
-`## Pre-0.1.0 development` section is frozen history. The box can still
+**release-please-generated from v0.1.0 on — never hand-edit it**;
+`CHANGELOG.pre-0.1.0.md` is frozen v1 history. The box can still
 run from a source checkout (`git pull && npm run build`) instead of the
 published package.
 

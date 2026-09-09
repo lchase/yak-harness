@@ -22,8 +22,8 @@ the minor and a `fix:` the patch. Nothing between releases is manual.
 
 ## `CHANGELOG.md`
 
-Generated from v0.1.0 on — **do not hand-edit it**. The pre-pipeline
-history is frozen under `## Pre-0.1.0 development`.
+Generated from v0.1.0 on — **do not hand-edit it**. Pre-pipeline
+history lives in `CHANGELOG.pre-0.1.0.md` (frozen).
 
 ## One-time setup (already done, recorded here)
 
