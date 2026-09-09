@@ -4,6 +4,13 @@ Type: grilling
 Status: resolved
 Blocked by: 06
 
+> **Update (post-v1):** §5 deferred the npm publish pipeline "until a
+> second box or external consumer exists". That trigger fired — the
+> harness was needed on a second machine — so the deferral was lifted:
+> `@lchase/yak-harness` now publishes via `release-please` + OIDC
+> trusted publishing, mirroring yak, and `CHANGELOG.md` is generated
+> from v0.1.0 on. See spec §10.4. The rest of this decision stands.
+
 ## Question
 
 With the runtime behaviour pinned (tickets 02–06), decide how the

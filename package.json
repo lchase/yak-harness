@@ -1,5 +1,5 @@
 {
-  "name": "yak-harness",
+  "name": "@lchase/yak-harness",
   "version": "0.0.0",
   "description": "Stateless cron reconciler bridging a GitHub Issues backlog and yak",
   "license": "MIT",
@@ -14,6 +14,18 @@
     "dist",
     "workflows"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lchase/yak-harness.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lchase/yak-harness/issues"
+  },
+  "homepage": "https://github.com/lchase/yak-harness#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
     "build": "tsup",
@@ -26,8 +38,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "guard:deps": "node scripts/guard-deps.mjs",
-    "guard:changelog": "node scripts/guard-changelog.mjs",
-    "check": "npm run typecheck && npm run lint && npm run coverage && npm run build && npm run guard:deps && npm run guard:changelog"
+    "check": "npm run typecheck && npm run lint && npm run coverage && npm run build && npm run guard:deps"
   },
   "dependencies": {
     "ajv": "^8.17.1",

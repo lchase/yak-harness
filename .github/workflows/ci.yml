@@ -37,9 +37,6 @@ jobs:
 
       - name: guard — runtime deps stay {zod, ajv}, no @lchase/yak
         run: npm run guard:deps
-      - name: guard — CHANGELOG updated with source changes
-        if: github.event_name == 'pull_request'
-        run: node scripts/guard-changelog.mjs "origin/${{ github.base_ref }}"
 
   pr-title:
     if: github.event_name == 'pull_request'

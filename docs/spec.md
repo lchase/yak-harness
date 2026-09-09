@@ -856,13 +856,19 @@ Overlap is the harness's concern (§6.6), not the operator's. A
 
 ### 10.4 Versioning and release
 
-- **Deploy = `git pull && npm run build`** on the box; the next cron
-  tick runs the new `dist/`. No restart (stateless process).
-- The repo uses **conventional commits and a maintained CHANGELOG**
-  (cheap; makes a later release-please switch trivial), but **no npm
-  publish pipeline** in v1.
-- npm publish / release-please / trusted publishing (mirroring yak) is
-  **deferred** until a second box or external consumer exists.
+- Published to npm as **`@lchase/yak-harness`** via `release-please` +
+  OIDC trusted publishing, mirroring yak: a push to `main` with a
+  `feat:` / `fix:` commit opens a release PR; merging it tags the
+  release and dispatches `publish.yml`, which runs the gate and
+  `npm publish --provenance`. `CHANGELOG.md` is release-please-generated
+  from v0.1.0 on.
+- Install / upgrade on the box: `npm install -g @lchase/yak-harness`.
+  A source checkout (`git pull && npm run build`) still works for
+  running an unreleased build. Either way the next cron tick picks up
+  the new code — no restart (stateless process).
+- The deferral in decision 07 ("npm publish until a second box or
+  external consumer exists") was lifted once the harness was needed on
+  a second machine.
 
 ### 10.5 Logging
 
