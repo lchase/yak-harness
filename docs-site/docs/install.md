@@ -21,7 +21,12 @@ manage any of it:
    `gh auth status`.
 2. **`yak` on `PATH`**, yak ≥ 0.3.0 (for `yak run --input`). A
    **runtime** requirement — there is no `@lchase/yak` build
-   dependency. Check with `yak --version`.
+   dependency. Install the published package globally:
+
+   ```bash
+   npm install -g @lchase/yak
+   yak --version        # must be >= 0.3.0
+   ```
 3. **The target repo checked out** at `yakRepoPath`, on its default
    branch. The harness never clones or pulls it — keeping that checkout
    current is your job (a separate cron line, usually).
@@ -37,9 +42,13 @@ Not published to npm in v1. Deploy is a source checkout plus a build:
 git clone git@github.com:lchase/yak-harness.git
 cd yak-harness
 npm ci
-npm run build        # tsup → dist/, with the `yak-harness` bin entry
-npm link             # or add dist/cli.js to PATH yourself
+npm run build        # tsup → dist/cli.js (has its shebang, +x)
+npm link             # symlinks the `yak-harness` bin onto PATH
 ```
+
+If you would rather not `npm link`, skip it and invoke the built entry
+directly — `node /path/to/yak-harness/dist/cli.js tick --config …` — or
+put `dist/cli.js` on `PATH` yourself.
 
 Upgrades are `git pull && npm ci && npm run build` on the box. The next
 cron tick runs the new `dist/` — no restart, because the process is
