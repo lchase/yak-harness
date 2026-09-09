@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/lchase/yak-harness/compare/yak-harness-v0.1.0...yak-harness-v0.1.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* drop publishConfig.provenance (breaks local publish) ([#48](https://github.com/lchase/yak-harness/issues/48)) ([09426de](https://github.com/lchase/yak-harness/commit/09426deba0ac976ce051d3acb361cd38b02a0b17))
+
 ## 0.1.0 (2026-09-09)
 
 
