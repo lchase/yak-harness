@@ -13,9 +13,14 @@ real tokens.
 
 ## Prerequisites
 
-A box that passes [`yak-harness doctor`](./install#yak-harness-doctor)
+```bash
+npm install -g @lchase/yak @lchase/yak-harness
+```
+
+A box that then passes [`yak-harness doctor`](./install#yak-harness-doctor)
 and a git repo you have push access to. The examples use
-`lchase/my-project`.
+`lchase/my-project`. Full setup and the box preconditions are on the
+[Install](./install) page.
 
 ## 1. Write a config
 
