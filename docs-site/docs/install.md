@@ -5,50 +5,44 @@ title: Install & setup
 
 # Install & setup
 
-The harness runs on a **persistent-filesystem box** — the same machine,
-with the same disk, tick after tick. It co-locates with a checkout of
-the repo yak will work in. This page covers what that box needs and how
-to check it.
-
-## Box preconditions
-
-The harness assumes all of the following and does **not** install or
-manage any of it:
-
-1. **`gh` CLI installed and authenticated** for the target repo, with
-   `repo` scope. The harness shells out to `gh` for every GitHub
-   operation and never handles a token itself. Check with
-   `gh auth status`.
-2. **`yak` on `PATH`**, yak ≥ 0.3.0 (for `yak run --input`). A
-   **runtime** requirement — there is no `@lchase/yak` build
-   dependency. Check with `yak --version`.
-3. **The target repo checked out** at `yakRepoPath`, on its default
-   branch. The harness never clones or pulls it — keeping that checkout
-   current is your job (a separate cron line, usually).
-4. **Node 22 or newer** to run `yak-harness` itself.
-5. **Write access** to `<yakRepoPath>/.runs/` and
-   `<yakRepoPath>/.harness/`.
+The harness runs on a **persistent-filesystem box** — same machine,
+same disk, tick after tick — co-located with a checkout of the repo yak
+will work in.
 
 ## Install
 
-Not published to npm in v1. Deploy is a source checkout plus a build:
-
 ```bash
+# 1. yak (published to npm)
+npm install -g @lchase/yak
+
+# 2. yak-harness (no npm release yet — build from source)
 git clone git@github.com:lchase/yak-harness.git
 cd yak-harness
-npm ci
-npm run build        # tsup → dist/, with the `yak-harness` bin entry
-npm link             # or add dist/cli.js to PATH yourself
+npm ci && npm run build
+npm link
 ```
 
-Upgrades are `git pull && npm ci && npm run build` on the box. The next
-cron tick runs the new `dist/` — no restart, because the process is
-stateless.
+`npm link` puts the `yak-harness` bin on `PATH`. Both commands now
+work:
 
-## Configuration
+```bash
+yak --version           # >= 0.3.0
+yak-harness --help
+```
 
-Every invocation takes `--config <path>` pointing at one plain-JSON
-file. Minimum:
+## Upgrade to latest
+
+```bash
+npm install -g @lchase/yak@latest                      # yak
+cd yak-harness && git pull && npm ci && npm run build  # yak-harness
+```
+
+No restart — the tick is a stateless process, so the next run picks up
+the new build. Run `yak-harness doctor` again afterwards.
+
+## Run
+
+Write one JSON config file:
 
 ```json
 {
@@ -58,15 +52,48 @@ file. Minimum:
 }
 ```
 
+Then:
+
+```bash
+yak-harness doctor --config /srv/harness.config.json   # check the box
+yak-harness tick   --config /srv/harness.config.json --dry-run   # plan only
+yak-harness tick   --config /srv/harness.config.json   # one real pass
+```
+
+Schedule the real tick with cron — one line, no service:
+
+```cron
+*/5 * * * * yak-harness tick --config /srv/harness.config.json
+```
+
+Every config key is in the [Configuration reference](./configuration).
 `stalledAfterMinutes` has **no default** — you must set it, and it must
-exceed the longest single agent step your workflow runs (see
-[Configuration reference](./configuration) for why and for every other
-key).
+exceed the longest single agent step your workflow runs.
+
+---
+
+## Box preconditions
+
+`yak-harness doctor` checks all of these. The harness assumes them and
+does **not** install or manage any:
+
+1. **`gh` CLI installed and authenticated** for the target repo, with
+   `repo` scope. The harness shells out to `gh` for every GitHub
+   operation and never handles a token itself (`gh auth status`).
+2. **`yak` on `PATH`**, ≥ 0.3.0 (for `yak run --input`) — a **runtime**
+   requirement, there is no `@lchase/yak` build dependency.
+3. **The target repo checked out** at `yakRepoPath`, on its default
+   branch. The harness never clones or pulls it — keeping that checkout
+   current is your job (usually a separate cron line).
+4. **Node 22 or newer** to run `yak-harness` itself.
+5. **Write access** to `<yakRepoPath>/.runs/` and
+   `<yakRepoPath>/.harness/`.
+
+If you would rather not `npm link`, invoke the built entry directly —
+`node /path/to/yak-harness/dist/cli.js tick --config …` — or put
+`dist/cli.js` on `PATH` yourself.
 
 ## `yak-harness doctor`
-
-`doctor` checks preconditions 1–5 and exits non-zero if any fail. Every
-check runs; every failure is reported.
 
 ```bash
 yak-harness doctor --config /srv/harness.config.json
@@ -85,10 +112,7 @@ doctor: all checks passed
 Every check runs even when an earlier one fails, so one pass tells you
 everything that is wrong. A `FAIL` line carries the underlying error
 (the `gh` / `git` stderr, the Node version, the path that would not
-accept a write probe).
-
-Run it once after setting up the box, and again after any upgrade to
-yak or `gh`.
+accept a write probe). Run it after setup and after any upgrade.
 
 ## Read next
 
